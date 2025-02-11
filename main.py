@@ -14,6 +14,11 @@ def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="60d")  # Last 60 days of stock data for better analysis
     data = add_all_ta_features(data, open='Open', high='High', low='Low', close='Close', volume='Volume')
+    
+    # Check if 'volume' exists after TA features are added
+    if 'volume' not in data.columns:
+        raise KeyError("The 'volume' column is missing from the stock data after adding technical analysis features.")
+    
     return data
 
 # Function to analyze market sentiment based on news headlines
@@ -53,10 +58,13 @@ def generate_recommendation(data, sentiment_score):
     rsi = calculate_rsi(data)
     latest_rsi = rsi.iloc[-1]
     
+    # Ensure 'volume' column is available
+    if 'Volume' not in data.columns:
+        raise KeyError("Volume data is missing.")
+    
     # Use a RandomForest classifier to predict the recommendation
-    # Placeholder logic to use stock data and sentiment
     features = [
-        data['volume'].mean(),   # Average volume
+        data['Volume'].mean(),   # Average volume
         latest_rsi,              # RSI indicator
         sentiment_score          # Sentiment from news
     ]
@@ -79,10 +87,15 @@ st.title("AI Stock Options Predictor")
 
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
-    stock_data = fetch_stock_data(symbol)
-    sentiment_score = fetch_sentiment(symbol)
-    option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score)
-    
-    st.write(f"Option Recommendation: {option}")
-    st.write(f"Strike Price: ${strike_price}")
-    st.write(f"Expiration Date: {expiration}")
+    try:
+        stock_data = fetch_stock_data(symbol)
+        sentiment_score = fetch_sentiment(symbol)
+        option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score)
+        
+        st.write(f"Option Recommendation: {option}")
+        st.write(f"Strike Price: ${strike_price}")
+        st.write(f"Expiration Date: {expiration}")
+    except KeyError as e:
+        st.error(f"Error: {e}")
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
