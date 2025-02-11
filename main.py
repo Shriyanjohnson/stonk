@@ -18,8 +18,10 @@ def fetch_stock_data(symbol):
 
 # Function to analyze market sentiment based on news headlines
 def fetch_sentiment(symbol):
-    newsapi = NewsApiClient(api_key='your_news_api_key')  # Replace with your NewsAPI key
+    # Using the NewsAPI to fetch news for the symbol
+    newsapi = NewsApiClient(api_key='833b7f0c6c7243b6b751715b243e4802')  # Replace with your NewsAPI key
     all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
+    
     headlines = [article['title'] for article in all_articles['articles']]
     
     sentiment_score = 0
@@ -27,6 +29,7 @@ def fetch_sentiment(symbol):
     for headline in headlines:
         sentiment_score += analyzer.polarity_scores(headline)['compound']
     
+    # Calculate the average sentiment score
     sentiment_score /= len(headlines) if len(headlines) > 0 else 1
     return sentiment_score
 
@@ -41,21 +44,33 @@ def calculate_rsi(data, period=14):
 
 # Function to predict the stock option recommendation (Call or Put)
 def generate_recommendation(data, sentiment_score):
+    # Calculate technical features (e.g., RSI)
     rsi = calculate_rsi(data)
     latest_rsi = rsi.iloc[-1]
     
+    # Create feature vector: average volume, RSI, sentiment score
     features = [
-        data['volume'].mean(),   # Average volume
+        data['Volume'].mean(),   # Average volume
         latest_rsi,              # RSI indicator
         sentiment_score          # Sentiment from news
     ]
     
-    model = RandomForestClassifier()
-    model.fit([[features[0], features[1], features[2]]], [1])  # Dummy training for now
+    # Use a basic dummy model (or even skip fitting)
+    model = RandomForestClassifier(n_estimators=10)
+    
+    # Let's hardcode labels for the fitting process for now (1 = Call, 0 = Put)
+    X = np.array([features])  # Features in a 2D array
+    y = np.array([1])         # Dummy labels (1 for Call)
+    
+    # Fit the model with dummy data (you'd need a better dataset for real use)
+    model.fit(X, y)
+    
+    # Make prediction (call or put)
     prediction = model.predict([features])
     
     option = "Call" if prediction[0] == 1 else "Put"
     
+    # Calculate strike price as nearest 10 of the last closing price
     strike_price = round(data['Close'].iloc[-1] / 10) * 10
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()  # Next Friday
     
