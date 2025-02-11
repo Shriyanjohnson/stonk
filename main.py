@@ -15,7 +15,7 @@ def fetch_stock_data(symbol):
     data = stock.history(period="60d")  # Last 60 days of stock data for better analysis
     data = add_all_ta_features(data, open='Open', high='High', low='Low', close='Close', volume='Volume')
     
-    # Check if 'volume' exists after TA features are added
+    # Check the columns after adding TA features to ensure 'volume' is correctly added
     if 'volume' not in data.columns:
         raise KeyError("The 'volume' column is missing from the stock data after adding technical analysis features.")
     
@@ -58,9 +58,9 @@ def generate_recommendation(data, sentiment_score):
     rsi = calculate_rsi(data)
     latest_rsi = rsi.iloc[-1]
     
-    # Ensure 'volume' column is available
+    # Check if 'Volume' is available and correctly named
     if 'Volume' not in data.columns:
-        raise KeyError("Volume data is missing.")
+        raise KeyError("Volume data is missing or incorrectly named.")
     
     # Use a RandomForest classifier to predict the recommendation
     features = [
