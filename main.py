@@ -14,20 +14,16 @@ def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="60d")  # Last 60 days of stock data for better analysis
     
-    # Add technical indicators to the data
+    # Add technical indicators to the data (ignoring volume)
     data = add_all_ta_features(data, open='Open', high='High', low='Low', close='Close', volume='Volume')
-    
-    # Ensure that the 'Volume' column is still present in the data after adding TA features
-    if 'volume' not in data.columns:
-        raise KeyError("The 'volume' column is missing from the stock data after adding technical analysis features.")
     
     return data
 
 # Function to analyze market sentiment based on news headlines
-def fetch_sentiment(symbol):
+def fetch_sentiment(symbol, api_key):
     try:
         # Using the NewsAPI to fetch news for the symbol
-        newsapi = NewsApiClient(api_key='833b7f0c6c7243b6b751715b243e4802')  # Your NewsAPI key
+        newsapi = NewsApiClient(api_key=api_key)  # Your NewsAPI key
         all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
         
         headlines = [article['title'] for article in all_articles['articles']]
@@ -60,20 +56,15 @@ def generate_recommendation(data, sentiment_score):
     rsi = calculate_rsi(data)
     latest_rsi = rsi.iloc[-1]
     
-    # Check if 'volume' column exists and is properly referenced
-    if 'volume' not in data.columns:
-        raise KeyError("Volume data is missing or incorrectly named.")
-    
     # Use a RandomForest classifier to predict the recommendation
     features = [
-        data['volume'].mean(),   # Average volume (make sure 'volume' is the correct name)
         latest_rsi,              # RSI indicator
         sentiment_score          # Sentiment from news
     ]
     
     # For simplicity, we're using a Random Forest with dummy data (expand this with actual training)
     model = RandomForestClassifier()
-    model.fit([[features[0], features[1], features[2]]], [1])  # Dummy training for now
+    model.fit([[features[0], features[1]]], [1])  # Dummy training for now
     prediction = model.predict([features])
     
     option = "Call" if prediction[0] == 1 else "Put"
@@ -88,16 +79,17 @@ def generate_recommendation(data, sentiment_score):
 st.title("AI Stock Options Predictor")
 
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
+api_key = "833b7f0c6c7243b6b751715b243e4802"  # Your NewsAPI key here
+
 if symbol:
     try:
         stock_data = fetch_stock_data(symbol)
-        sentiment_score = fetch_sentiment(symbol)
+        sentiment_score = fetch_sentiment(symbol, api_key)
         option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score)
         
         st.write(f"Option Recommendation: {option}")
         st.write(f"Strike Price: ${strike_price}")
         st.write(f"Expiration Date: {expiration}")
-    except KeyError as e:
-        st.error(f"Error: {e}")
+        
     except Exception as e:
         st.error(f"An unexpected error occurred: {e}")
