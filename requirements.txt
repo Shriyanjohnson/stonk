@@ -1,8 +1,7 @@
-yfinance
 streamlit
+yfinance
 ta
-pandas
-textblob
 vaderSentiment
 newsapi-python
 scikit-learn
+pandas
