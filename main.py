@@ -13,11 +13,13 @@ from sklearn.ensemble import RandomForestClassifier
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="60d")  # Last 60 days of stock data for better analysis
+    
+    # Add technical indicators to the data
     data = add_all_ta_features(data, open='Open', high='High', low='Low', close='Close', volume='Volume')
     
-    # Check the columns after adding TA features to ensure 'volume' is correctly added
-    if 'volume' not in data.columns:
-        raise KeyError("The 'volume' column is missing from the stock data after adding technical analysis features.")
+    # Ensure that the 'Volume' column is still present in the data after adding TA features
+    if 'Volume' not in data.columns:
+        raise KeyError("The 'Volume' column is missing from the stock data after adding technical analysis features.")
     
     return data
 
