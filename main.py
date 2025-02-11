@@ -19,7 +19,7 @@ def fetch_stock_data(symbol):
 # Function to analyze market sentiment based on news headlines
 def fetch_sentiment(symbol):
     # Using the NewsAPI to fetch news for the symbol
-    newsapi = NewsApiClient(api_key='your_newsapi_key')  # Replace with your NewsAPI key
+    newsapi = NewsApiClient(api_key='833b7f0c6c7243b6b751715b243e4802')  # Replace with your NewsAPI key
     all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
     
     headlines = [article['title'] for article in all_articles['articles']]
