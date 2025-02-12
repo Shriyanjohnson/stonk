@@ -93,41 +93,28 @@ def train_or_update_model(data, eps, model=None):
     return model, accuracy
 
 # Generate options prediction (call/put, strike price, and expiration date)
-def generate_options_prediction(current_price, model, features):
-    # Predict the price movement (1 for up, 0 for down)
-    prediction = model.predict(features)
-    predicted_movement = "call" if prediction[-1] == 1 else "put"
+def generate_options_prediction(real_time_price, model, features_scaled):
+    prediction = model.predict(features_scaled)
     
-    # Define strike price based on predicted movement
-    strike_price = current_price * 1.05 if predicted_movement == "call" else current_price * 0.95
+    # Determine the type of option (Call or Put)
+    if prediction == 1:
+        predicted_movement = "Call"
+    else:
+        predicted_movement = "Put"
     
-    # Get the expiration date (next Friday)
+    # Calculate strike price (close price ± some range)
+    strike_price = real_time_price * (1 + 0.05) if predicted_movement == "Call" else real_time_price * (1 - 0.05)
+    
+    # Get the expiration date (Friday of the current week)
     today = datetime.date.today()
-    days_until_friday = (4 - today.weekday()) % 7  # Friday is weekday 4
+    days_until_friday = (4 - today.weekday()) % 7  # Find the number of days until Friday
     expiration_date = today + datetime.timedelta(days=days_until_friday)
     
-    return predicted_movement, strike_price, expiration_date
+    return predicted_movement, round(strike_price, 2), expiration_date
 
 # Streamlit UI
-st.markdown("<h1 style='color: white;'>💰 AI Stock Options Predictor 💰</h1>", unsafe_allow_html=True)
+st.title("💰 AI Stock Options Predictor 💰")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
-
-# Set the background to dark
-st.markdown("""
-    <style>
-        body {
-            background-color: #2e2e2e;
-            color: white;
-        }
-        .stTextInput>label {
-            color: white;
-        }
-        .stButton>button {
-            background-color: #4CAF50;
-            color: white;
-        }
-    </style>
-""", unsafe_allow_html=True)
 
 if symbol:
     stock_data = fetch_stock_data(symbol)
@@ -147,14 +134,22 @@ if symbol:
         st.write("### EPS: Not available")
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
 
-    # Prepare features for options prediction
-    features = stock_data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']].iloc[-1:].values
-    
+    # Features for options prediction (predicting call/put and expiration)
+    features = stock_data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']].iloc[-1:]
+
+    # Add EPS feature if available
+    if eps:
+        features['EPS'] = eps
+
+    # Scale the features using the same scaler used during training
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
+
     # Generate options prediction (call/put, strike price, and expiration date)
-    predicted_movement, strike_price, expiration_date = generate_options_prediction(real_time_price, model, features)
-    
-    st.write(f"### Predicted Option: **{predicted_movement.upper()}**")
-    st.write(f"### Strike Price: **${strike_price:.2f}**")
+    predicted_movement, strike_price, expiration_date = generate_options_prediction(real_time_price, model, features_scaled)
+
+    st.write(f"### Predicted Option Movement: **{predicted_movement}**")
+    st.write(f"### Predicted Strike Price: **${strike_price}**")
     st.write(f"### Expiration Date: **{expiration_date}**")
 
     # Charts
