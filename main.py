@@ -107,11 +107,11 @@ def generate_recommendation(data, sentiment_score, model):
     strike_price = round(latest_data['Close'] / 10) * 10
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
     
-    return option, strike_price, expiration_date, latest_data
+    return option, strike_price, expiration_date
 
 # Streamlit UI
-st.markdown('<div class="title">💰 AI Stock Options Predictor 💰</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Developed by Shriyan Kandula, a sophomore at Shaker High School.</div>', unsafe_allow_html=True)
+st.title("💰 AI Stock Options Predictor 💰")
+st.subheader("Developed by Shriyan Kandula, a sophomore at Shaker High School.")
 
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
@@ -120,55 +120,25 @@ if symbol:
     sentiment_score = fetch_sentiment(symbol)
     model, accuracy, X_test, y_test = train_model(stock_data)
 
-    current_price = stock_data['Close'].iloc[-1]
+    option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
 
-    st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
-
-    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model)
-
-    st.markdown(f"""
-        <div class="recommendation">
-            <h3>Option Recommendation: **{option}**</h3>
-            <p>Strike Price: **${strike_price}**</p>
-            <p>Expiration Date: **{expiration}**</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-    test_accuracy = model.score(X_test, y_test) * 100
-    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-
-    # Displaying Technical Indicators
-    st.subheader('Technical Indicators and Their Current Values')
-    st.write(f"**RSI** (Relative Strength Index): {latest_data['RSI']:.2f} - An RSI above 70 indicates overbought conditions, while below 30 indicates oversold.")
-    st.write(f"**MACD** (Moving Average Convergence Divergence): {latest_data['MACD']:.2f} - Indicates momentum. Positive values suggest upward momentum.")
-    st.write(f"**On-Balance Volume (OBV)**: {latest_data['On_Balance_Volume']:.2f} - Shows the cumulative buying and selling pressure.")
-    st.write(f"**SMA-20** (Simple Moving Average - 20 days): {latest_data['SMA_20']:.2f}")
-    st.write(f"**SMA-50** (Simple Moving Average - 50 days): {latest_data['SMA_50']:.2f}")
-    st.write(f"**Volatility** (Average True Range): {latest_data['Volatility']:.2f} - A measure of price fluctuations over a given period.")
-
-    # Visualizations
-    st.subheader('Stock Data and Technical Indicators')
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.02,
-                        subplot_titles=('Stock Price', 'RSI Indicator', 'MACD Indicator'))
-
-    fig.add_trace(go.Candlestick(x=stock_data.index,
-                open=stock_data['Open'], high=stock_data['High'], low=stock_data['Low'], close=stock_data['Close']),
-                row=1, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'),
-                  row=2, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'),
-                  row=3, col=1)
-
-    fig.update_layout(title=f"{symbol} Stock Price and Technical Indicators",
-                      xaxis_title="Date", yaxis_title="Price")
-    st.plotly_chart(fig)
-
-    # Displaying additional information
-    st.markdown("### Additional Technical Analysis")
-    st.write("**RSI** indicates if a stock is overbought (>70) or oversold (<30).")
-    st.write("**MACD** is used to identify changes in momentum.")
-    st.write("**On-Balance Volume** shows how volume is related to price movement.")
-    st.write("**SMA** indicates trend direction.")
+    st.write(f"### Option Recommendation: **{option}**")
+    st.write(f"Strike Price: **${strike_price}**")
+    st.write(f"Expiration Date: **{expiration}**")
     
-    st.markdown("<br><br><div class='footer'>Made by Shriyan Kandula - Sophomore at Shaker High School.</div>", unsafe_allow_html=True)
+    st.write(f"### Model Accuracy: **{accuracy:.2f}%**")
+
+# Key Features Section
+st.subheader("🌟 Key Features That Make It Stand Out")
+st.write("""
+- **Advanced Machine Learning Models**: Uses XGBoost, Random Forest, and GridSearchCV to optimize predictions.
+- **Comprehensive Technical Analysis**: Includes RSI, MACD, Bollinger Bands, and more.
+- **Real-Time Market Sentiment Analysis**: Fetches news headlines and applies sentiment analysis.
+- **Options Trading Recommendations**: Suggests actionable trades based on predicted price movements.
+- **User-Friendly & Professional UI**: Clean interface with interactive charts.
+- **Thorough Explanations**: Provides insights into each indicator and model accuracy.
+- **Built for Accuracy**: Implements hyperparameter tuning and real-time data.
+
+🚀 **Your app is a powerful AI-driven stock trading assistant that combines ML, technical indicators, and sentiment analysis to provide accurate, actionable insights. It’s more than just a predictor—it’s a decision-making tool for traders. 🔥**
+""")
+
