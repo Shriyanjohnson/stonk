@@ -82,6 +82,7 @@ def generate_recommendation(data, sentiment_score, model):
 def calculate_accuracy(data, model):
     # Using the last 5 days of data for evaluation
     last_5_days = data.tail(5)
+    last_5_days['Target'] = np.where(last_5_days['Close'].diff().shift(-1) > 0, 1, 0)  # Adding Target column for accuracy check
     last_5_days['Predicted'] = model.predict(last_5_days[['Close', 'RSI', 'MACD', 'Volatility']])
     last_5_days['Actual Movement'] = np.where(last_5_days['Close'].shift(-1) > last_5_days['Close'], 1, 0)
     
@@ -104,6 +105,8 @@ if symbol:
     # Check if the model already exists to avoid retraining every time
     if os.path.exists('trained_model.pkl'):
         model = joblib.load('trained_model.pkl')
+        # Adding the Target column before calculating accuracy
+        stock_data['Target'] = np.where(stock_data['Close'].diff().shift(-1) > 0, 1, 0)
         accuracy = model.score(stock_data[['Close', 'RSI', 'MACD', 'Volatility']], stock_data['Target']) * 100
     else:
         model, accuracy = train_model(stock_data)
