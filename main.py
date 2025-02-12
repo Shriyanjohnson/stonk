@@ -119,25 +119,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-# Additional Explanation Section (Could be at the end of the app)
-st.write("""
-### How the Model Works:
-
-This model uses several key indicators to predict stock movements, focusing on technical analysis like RSI (Relative Strength Index), ATR (Average True Range), SMA (Simple Moving Average), and OBV (On-Balance Volume). Additionally, we incorporate **sentiment analysis** of recent news articles related to the stock symbol. 
-
-The machine learning model used is a **Random Forest Classifier**. It is trained on historical stock data and can predict whether the stock's price will go up (Buy/Call) or down (Sell/Put) based on its recent performance and external news sentiment.
-
-The model is constantly updated, learning over time as it receives more data and can improve its accuracy. By analyzing stock price movements, technical indicators, and news sentiment, it makes predictions that help guide option recommendations.
-
-### Why This is Better Than Other Platforms:
-- **Comprehensive Data Sources**: It combines technical indicators, sentiment analysis, and real-time market data.
-- **Customizable**: Unlike other platforms, you can input your stock symbol and get tailored predictions and option recommendations.
-- **Accuracy**: The model continually learns from historical data and external news, improving its decision-making.
-
-### What's Next:
-- Incorporating earnings reports as part of the analysis.
-- More indicators and features to make predictions more accurate.
-- Further improvement in model accuracy and response time.
-
-""")
