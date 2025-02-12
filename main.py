@@ -9,29 +9,24 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 import pandas as pd
 import os
-import plotly.graph_objects as go
+import joblib  # New addition to save and load models
+import plotly.graph_objects as go  # Make sure you import plotly for the chart
 
 # Function to fetch stock data
 def fetch_stock_data(symbol):
-    try:
-        stock = yf.Ticker(symbol)
-        data = stock.history(period="90d")  # Last 90 days for better analysis
-        data['RSI'] = RSIIndicator(data['Close']).rsi()
-        data['MACD'] = MACD(data['Close']).macd()
-        data['Volatility'] = data['Close'].pct_change().rolling(10).std()  # 10-day rolling volatility
-        data.dropna(inplace=True)  # Remove NaN values
-        return data
-    except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {e}")
-        return pd.DataFrame()
+    stock = yf.Ticker(symbol)
+    data = stock.history(period="90d")  # Last 90 days for better analysis
+    data['RSI'] = RSIIndicator(data['Close']).rsi()
+    data['MACD'] = MACD(data['Close']).macd()
+    data['Volatility'] = data['Close'].pct_change().rolling(10).std()  # 10-day rolling volatility
+    data.dropna(inplace=True)  # Remove NaN values
+    return data
 
 # Function to fetch sentiment score from NewsAPI
 def fetch_sentiment(symbol):
     try:
+        # Use environment variable for API key
         api_key = os.getenv("newsapi_key")  # Get API key from environment variable
-        if not api_key:
-            st.error("API Key not found for NewsAPI!")
-            return 0
         newsapi = NewsApiClient(api_key=api_key)
         all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
         articles = all_articles.get('articles', [])
@@ -40,8 +35,7 @@ def fetch_sentiment(symbol):
 
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
-    except Exception as e:
-        st.error(f"Error fetching sentiment for {symbol}: {e}")
+    except Exception:
         return 0  # Default to neutral if API fails
 
 # Function to train machine learning model
@@ -59,53 +53,16 @@ def train_model(data):
     accuracy = model.score(features, labels) * 100
     return model, accuracy
 
-# Function to generate option recommendation with more intelligent decision logic
+# Function to generate option recommendation
 def generate_recommendation(data, sentiment_score, model):
     latest_data = data.iloc[-1]
     latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility']]])
 
-    # Predict using model
+    # Get prediction from the model (1 = Call, 0 = Put)
     prediction = model.predict(latest_features)[0]
     
-    # Decision logic based on technical indicators and sentiment score
-    rsi = latest_data['RSI']
-    macd = latest_data['MACD']
-    volatility = latest_data['Volatility']
-
-    # RSI-based decision (overbought/oversold)
-    if rsi < 30:
-        rsi_signal = 1  # Buy (Call)
-    elif rsi > 70:
-        rsi_signal = 0  # Sell (Put)
-    else:
-        rsi_signal = None  # Neutral
-
-    # MACD-based decision (crosses)
-    if macd > 0:
-        macd_signal = 1  # Bullish (Call)
-    elif macd < 0:
-        macd_signal = 0  # Bearish (Put)
-    else:
-        macd_signal = None  # Neutral
-
-    # Volatility-based decision
-    if volatility > 0.02:
-        volatility_signal = 1  # High volatility, consider call or put with larger strike
-    else:
-        volatility_signal = None  # Neutral
-
-    # Combining signals to form a recommendation
-    signals = [rsi_signal, macd_signal, volatility_signal]
-    bullish_signals = signals.count(1)
-    bearish_signals = signals.count(0)
-
-    # Make a final decision based on the majority of signals
-    if bullish_signals > bearish_signals:
-        option = "Call"
-    elif bearish_signals > bullish_signals:
-        option = "Put"
-    else:
-        option = "Hold"  # No clear recommendation, maybe a neutral market
+    # Set option based on model prediction: 1 for Call, 0 for Put
+    option = "Call" if prediction == 1 else "Put"
 
     # Adjust recommendation based on sentiment
     if sentiment_score > 0.2 and option == "Put":
@@ -113,7 +70,10 @@ def generate_recommendation(data, sentiment_score, model):
     elif sentiment_score < -0.2 and option == "Call":
         option = "Put"
 
+    # Calculate the strike price (rounded to the nearest 10)
     strike_price = round(latest_data['Close'] / 10) * 10
+    
+    # Set expiration to the next Friday
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
 
     return option, strike_price, expiration_date
@@ -125,13 +85,20 @@ st.image("https://media.istockphoto.com/id/184276818/photo/us-dollars-stack.webp
 
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
+# Check if the symbol is valid
 if symbol:
     stock_data = fetch_stock_data(symbol)
-    if stock_data.empty:
-        st.stop()  # Stop execution if no stock data is fetched
-
     sentiment_score = fetch_sentiment(symbol)
-    model, accuracy = train_model(stock_data)
+    
+    # Check if the model already exists to avoid retraining every time
+    if os.path.exists('trained_model.pkl'):
+        model = joblib.load('trained_model.pkl')
+        accuracy = model.score(stock_data[['Close', 'RSI', 'MACD', 'Volatility']], stock_data['Target']) * 100
+    else:
+        model, accuracy = train_model(stock_data)
+        # Save the trained model for future use
+        joblib.dump(model, 'trained_model.pkl')
+
     option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
 
     st.write(f"### Option Recommendation: **{option}**")
@@ -141,7 +108,7 @@ if symbol:
     # Display Model Accuracy
     st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
 
-    # Plot stock data
+    # Plot stock data using Plotly
     fig = go.Figure()
     fig.add_trace(go.Candlestick(x=stock_data.index,
                                  open=stock_data['Open'],
