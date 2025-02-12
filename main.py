@@ -93,7 +93,7 @@ def calculate_accuracy(data, model):
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰")
 st.image("https://media.istockphoto.com/id/184276818/photo/us-dollars-stack.webp?b=1&s=170667a&w=0&k=20&c=FgRD0szcZ1Z-vpMZtkmMl5m1lmjVxQ2FYr5FUzDfJmM=", 
-         caption="Let's Make Some Money!", use_column_width=True)
+         caption="Let's Make Some Money!", use_container_width=True)  # Updated to use_container_width
 
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
@@ -138,7 +138,7 @@ if symbol:
                       xaxis_title='Date',
                       yaxis_title='Stock Price',
                       xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)  # Updated to use_container_width
 
     st.markdown("""
     **Disclaimer:** This application is for informational purposes only and does not constitute financial advice.
@@ -148,3 +148,4 @@ if symbol:
 # Footer
 st.markdown("---")
 st.markdown("### Created by **Shriyan K**")
+
