@@ -11,6 +11,7 @@ from sklearn.model_selection import train_test_split, cross_val_score
 import pandas as pd
 import os
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Function to fetch stock data
 def fetch_stock_data(symbol):
@@ -105,41 +106,55 @@ if symbol:
     else:
         st.markdown("#### **Neutral News Sentiment.** 🤔")
 
-    # Plotting Stock Chart (Candlestick Chart)
-    fig = go.Figure()
-
-    # Candlestick chart
-    fig.add_trace(go.Candlestick(x=stock_data.index,
-                                 open=stock_data['Open'],
-                                 high=stock_data['High'],
-                                 low=stock_data['Low'],
-                                 close=stock_data['Close'],
-                                 name='Market Data'))
-
-    # Adding Moving Averages (SMA & EMA)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='SMA 20', line=dict(color='red')))
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='SMA 50', line=dict(color='green')))
-
-    # Adding RSI as a subplot
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI', line=dict(color='purple')), row=2, col=1)
-
-    # Adding MACD as a subplot
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD', line=dict(color='blue')), row=3, col=1)
-
-    # Update Layout
-    fig.update_layout(title=f"{symbol} Stock Price Chart",
-                      xaxis_title='Date',
-                      yaxis_title='Stock Price',
-                      xaxis_rangeslider_visible=False)
-
-    fig.update_layout(
-        xaxis2=dict(title='Date', showgrid=False),
-        yaxis2=dict(title='RSI', range=[0, 100]),
-        xaxis3=dict(title='Date', showgrid=False),
-        yaxis3=dict(title='MACD')
+    # Create the figure with subplots (Candlestick, RSI, MACD)
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.1,
+        subplot_titles=(f"{symbol} Stock Price", "RSI", "MACD"),
+        row_heights=[0.5, 0.25, 0.25]
     )
 
-    # Show Chart
+    # Add Candlestick trace
+    fig.add_trace(go.Candlestick(
+        x=stock_data.index,
+        open=stock_data['Open'],
+        high=stock_data['High'],
+        low=stock_data['Low'],
+        close=stock_data['Close'],
+        name='Market Data'
+    ), row=1, col=1)
+
+    # Add Moving Averages (SMA & EMA) for stock data
+    fig.add_trace(go.Scatter(
+        x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='SMA 20', line=dict(color='red')
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='SMA 50', line=dict(color='green')
+    ), row=1, col=1)
+
+    # Add RSI trace
+    fig.add_trace(go.Scatter(
+        x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI', line=dict(color='purple')
+    ), row=2, col=1)
+
+    # Add MACD trace
+    fig.add_trace(go.Scatter(
+        x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD', line=dict(color='blue')
+    ), row=3, col=1)
+
+    # Update layout
+    fig.update_layout(
+        title=f"{symbol} Stock Analysis",
+        xaxis_title='Date',
+        yaxis_title='Stock Price',
+        xaxis_rangeslider_visible=False
+    )
+
+    fig.update_yaxes(range=[0, 100], row=2, col=1)  # RSI range
+    fig.update_yaxes(range=[stock_data['MACD'].min() - 1, stock_data['MACD'].max() + 1], row=3, col=1)  # MACD range
+
+    # Show the chart
     st.plotly_chart(fig, use_container_width=True)
 
     # Disclaimer
