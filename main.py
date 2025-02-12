@@ -2,78 +2,66 @@ import yfinance as yf
 import streamlit as st
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
-from sklearn.ensemble import RandomForestClassifier
-import plotly.graph_objects as go
-import numpy as np
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+import pandas as pd
+import os
+import plotly.graph_objects as go
 
-# Fetch stock data
+# Function to fetch stock data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
-    data = stock.history(period="90d")
+    data = stock.history(period="90d")  # Last 90 days for better analysis
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
-    data['Volatility'] = data['Close'].pct_change().rolling(10).std()
-    data.dropna(inplace=True)
+    data['Volatility'] = data['Close'].pct_change().rolling(10).std()  # 10-day rolling volatility
+    data['SMA_20'] = data['Close'].rolling(window=20).mean()
+    data['SMA_50'] = data['Close'].rolling(window=50).mean()
+    data.dropna(inplace=True)  # Remove NaN values
     return data
 
-# News sentiment analysis
+# Function to fetch sentiment score from NewsAPI
 def fetch_sentiment(symbol):
-    api_key = "833b7f0c6c7243b6b751715b243e4802"
-    newsapi = NewsApiClient(api_key=api_key)
-    all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
-    articles = all_articles.get('articles', [])
-    if not articles:
-        return 0
-    sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
-    return sentiment_score
+    try:
+        api_key = os.getenv("newsapi_key")  # Get API key from environment variable
+        newsapi = NewsApiClient(api_key=api_key)
+        all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
+        articles = all_articles.get('articles', [])
+        if not articles:
+            return 0  # Default to neutral if no articles are found
+        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
+        return sentiment_score
+    except Exception:
+        return 0  # Default to neutral if API fails
 
-# Machine learning model
+# Function to train machine learning model with cross-validation
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
-    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
-    features = data[['Close', 'RSI', 'MACD', 'Volatility']]
-    labels = data['Target']
-    model = RandomForestClassifier(n_estimators=100)
-    model.fit(features, labels)
-    return model
+    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)  # 1 = Call, 0 = Put
+    features = data[['Close', 'RSI', 'MACD', 'Volatility', 'SMA_20', 'SMA_50']]
+    labels = data['Target']  # Split the data for training/testing
+    X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)  # Initialize Random Forest model
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)  # Cross-validation for better generalization
+    accuracy = cv_scores.mean() * 100  # Cross-validation accuracy
+    model.fit(X_train, y_train)
+    return model, accuracy, X_test, y_test
 
-# Streamlit app
-st.title("Stock Prediction and Analysis")
-symbol = st.text_input("Enter Stock Symbol", "AAPL")
-stock_data = fetch_stock_data(symbol)
-
-# Display Stock data and charts
-st.write(stock_data.tail())
-fig = go.Figure()
-fig.add_trace(go.Candlestick(x=stock_data.index,
-                             open=stock_data['Open'],
-                             high=stock_data['High'],
-                             low=stock_data['Low'],
-                             close=stock_data['Close'],
-                             name='Candlesticks'))
-fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI', line=dict(color='blue')))
-fig.update_layout(title=f"{symbol} Stock Price, RSI",
-                  xaxis_title='Date',
-                  yaxis_title='Stock Price',
-                  xaxis_rangeslider_visible=False)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# Stock prediction
-model = train_model(stock_data)
-predicted_price = model.predict(stock_data[['Close', 'RSI', 'MACD', 'Volatility']])[-1]
-st.write(f"Predicted Movement: **{'Up' if predicted_price == 1 else 'Down'}**")
-
-# News sentiment analysis
-sentiment_score = fetch_sentiment(symbol)
-st.write(f"News Sentiment Score: **{sentiment_score:.2f}**")
-
-# Risk analysis
-volatility = stock_data['Price Change'].std() * 100
-st.write(f"Stock Volatility (Risk): **{volatility:.2f}%**")
-
-# Download option
-st.download_button("Download Stock Data", data=stock_data.to_csv(), file_name=f"{symbol}_data.csv", mime="text/csv")
+# Function to generate option recommendation with sentiment adjustment
+def generate_recommendation(data, sentiment_score, model):
+    latest_data = data.iloc[-1]
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    prediction_prob = model.predict_proba(latest_features)[0][1]  # Probability of being a 'Call'
+    option = "Call" if prediction_prob > 0.5 else "Put"
+    # Adjust recommendation based on sentiment
+    if sentiment_score > 0.2 and option == "Put":
+        option = "Call"
+    elif sentiment_score < -0.2 and option == "Call":
+        option = "Put"
+    strike_price = round(latest_data['Close'] / 10) * 10
+    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()  # Friday expiry
+  
