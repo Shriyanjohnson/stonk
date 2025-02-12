@@ -7,4 +7,3 @@ scikit-learn
 pandas
 numpy
 plotly
-python-dotenv  # Optional, for managing environment variables
