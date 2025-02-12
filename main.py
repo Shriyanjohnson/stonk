@@ -15,130 +15,76 @@ import plotly.graph_objects as go
 # Function to fetch stock data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
-    data = stock.history(period="90d")  # Last 90 days for better analysis
+    data = stock.history(period="90d")
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
-    data['Volatility'] = data['Close'].pct_change().rolling(10).std()  # 10-day rolling volatility
+    data['Volatility'] = data['Close'].pct_change().rolling(10).std()
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
-    data.dropna(inplace=True)  # Remove NaN values
+    data.dropna(inplace=True)
     return data
 
 # Function to fetch sentiment score from NewsAPI
 def fetch_sentiment(symbol):
     try:
-        api_key = os.getenv("newsapi_key")  # Get API key from environment variable
+        api_key = os.getenv("newsapi_key")
         newsapi = NewsApiClient(api_key=api_key)
         all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
         articles = all_articles.get('articles', [])
         if not articles:
-            return 0  # Default to neutral if no articles are found
-
+            return 0  
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
     except Exception:
-        return 0  # Default to neutral if API fails
+        return 0  
 
 # Function to train machine learning model with cross-validation
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
-    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)  # 1 = Call, 0 = Put
-
+    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     features = data[['Close', 'RSI', 'MACD', 'Volatility', 'SMA_20', 'SMA_50']]
     labels = data['Target']
     
-    # Split the data for training/testing
     X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, random_state=42)
-    
-    # Initialize Random Forest model
     model = RandomForestClassifier(n_estimators=100, random_state=42)
-    
-    # Use cross-validation for better generalization
     cv_scores = cross_val_score(model, X_train, y_train, cv=5)
-    accuracy = cv_scores.mean() * 100  # Cross-validation accuracy
-
+    accuracy = cv_scores.mean() * 100
     model.fit(X_train, y_train)
     return model, accuracy, X_test, y_test
 
-# Function to generate option recommendation with sentiment adjustment
-def generate_recommendation(data, sentiment_score, model):
-    latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50']]])
-
-    prediction_prob = model.predict_proba(latest_features)[0][1]  # Probability of being a 'Call'
-    option = "Call" if prediction_prob > 0.5 else "Put"
-
-    # Adjust recommendation based on sentiment
-    if sentiment_score > 0.2 and option == "Put":
-        option = "Call"
-    elif sentiment_score < -0.2 and option == "Call":
-        option = "Put"
-
-    strike_price = round(latest_data['Close'] / 10) * 10
-    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
-
-    return option, strike_price, expiration_date
-
 # Streamlit UI with enhanced layout
 st.set_page_config(page_title="AI Stock Options Predictor", layout="wide")
+st.sidebar.title("Navigation")
+tab = st.sidebar.radio("Select a Section", ("Stock Info", "Recommendations", "Charts"))
 
-# Sidebar: Inputs and Options
-st.sidebar.title("🔍 Stock Options Prediction")
-symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL")
-if symbol:
-    st.sidebar.markdown("### Stock Analysis Options")
-    show_chart = st.sidebar.checkbox("Show Stock Chart", value=True)
+if tab == "Stock Info":
+    st.title("📈 Stock Data")
+    symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL")
+    if symbol:
+        st.sidebar.markdown("### Stock Data")
+        stock_data = fetch_stock_data(symbol)
+        st.dataframe(stock_data.tail())
 
-# Display Main Title and Image
-st.title("💰 AI Stock Options Predictor 💰")
-st.image("https://media.istockphoto.com/id/184276818/photo/us-dollars-stack.webp?b=1&s=170667a&w=0&k=20&c=FgRD0szcZ1Z-vpMZtkmMl5m1lmjVxQ2FYr5FUzDfJmM=", 
-         caption="Let's Make Some Money!", use_container_width=True)
+elif tab == "Recommendations":
+    st.title("💡 Option Recommendations")
+    if symbol:
+        sentiment_score = fetch_sentiment(symbol)
+        model, accuracy, X_test, y_test = train_model(stock_data)
+        st.write(f"Model Accuracy: {accuracy}%")
+        st.write(f"Sentiment Score: {sentiment_score}")
+        option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
+        st.write(f"Recommendation: **{option}** with strike price **{strike_price}**")
 
-if symbol:
-    # Fetch data and process
-    stock_data = fetch_stock_data(symbol)
-    sentiment_score = fetch_sentiment(symbol)
-    model, accuracy, X_test, y_test = train_model(stock_data)
-    
-    # Generate recommendation
-    option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
-
-    # Create Columns for displaying results
-    col1, col2 = st.columns(2)
-
-    # Display Option Recommendation in columns
-    with col1:
-        st.write(f"### Option Recommendation: **{option}**")
-        st.write(f"Strike Price: **${strike_price}**")
-        st.write(f"Expiration Date: **{expiration}**")
-    
-    # Display Accuracy and Test Results in columns
-    with col2:
-        st.markdown(f"### 🔥 Model Accuracy (Cross-Validation): **{accuracy:.2f}%**")
-        test_accuracy = model.score(X_test, y_test) * 100
-        st.write(f"### Model Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-    
-    # Display Stock Chart if checkbox is selected
-    if show_chart:
+elif tab == "Charts":
+    st.title("📊 Stock Price Charts")
+    if symbol:
         fig = go.Figure()
         fig.add_trace(go.Candlestick(x=stock_data.index,
                                      open=stock_data['Open'],
                                      high=stock_data['High'],
                                      low=stock_data['Low'],
-                                     close=stock_data['Close'],
-                                     name='Market Data'))
-        fig.update_layout(title=f"{symbol} Stock Price Chart",
-                          xaxis_title='Date',
-                          yaxis_title='Stock Price',
-                          xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.markdown("""
-    **Disclaimer:** This application is for informational purposes only and does not constitute financial advice.
-    Please conduct your own due diligence before making any investment decisions.
-    """)
-
-# Footer with contact information
+                                     close=stock_data['Close']))
+        st.plotly_chart(fig)
+    
 st.markdown("---")
 st.markdown("### Created by **Shriyan K**")
-st.markdown("For inquiries or feedback, contact: **shriyan.k@example.com**")
