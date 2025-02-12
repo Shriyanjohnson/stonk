@@ -3,59 +3,30 @@ import streamlit as st
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from ta.volatility import AverageTrueRange
-from ta.volume import OnBalanceVolume
+import pandas as pd
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
-import pandas as pd
-import os
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.preprocessing import StandardScaler
-import seaborn as sns
-import matplotlib.pyplot as plt
+import os
 
-# Custom HTML & CSS Styling
-st.markdown("""
-    <style>
-        .title {
-            text-align: center;
-            color: #ecf0f1;
-            font-size: 36px;
-            font-weight: bold;
-            margin-top: 20px;
-        }
-        .subtitle {
-            text-align: center;
-            color: #bdc3c7;
-            font-size: 18px;
-            margin-bottom: 20px;
-        }
-        .current-price, .recommendation {
-            padding: 20px;
-            background-color: #ecf0f1;
-            border-radius: 8px;
-            margin-top: 30px;
-            text-align: center;
-            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
-            font-size: 24px;
-            color: #2c3e50;
-        }
-        .recommendation h3 {
-            color: #e74c3c;
-            font-size: 22px;
-        }
-        .footer {
-            text-align: center;
-            color: #7f8c8d;
-            margin-top: 50px;
-            font-size: 16px;
-        }
-    </style>
-""", unsafe_allow_html=True)
+# Custom OBV Implementation
+def custom_on_balance_volume(df):
+    obv = [0]  # initialize with 0 for the first row
+    for i in range(1, len(df)):
+        if df['Close'][i] > df['Close'][i - 1]:
+            obv.append(obv[-1] + df['Volume'][i])  # price goes up, OBV increases
+        elif df['Close'][i] < df['Close'][i - 1]:
+            obv.append(obv[-1] - df['Volume'][i])  # price goes down, OBV decreases
+        else:
+            obv.append(obv[-1])  # price unchanged, OBV remains the same
+    df['On_Balance_Volume'] = obv
+    return df
 
 # Function to fetch stock data
 @st.cache_data
@@ -67,7 +38,7 @@ def fetch_stock_data(symbol):
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
     data['Volatility'] = AverageTrueRange(data['High'], data['Low'], data['Close']).average_true_range()
-    data['On_Balance_Volume'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
+    data = custom_on_balance_volume(data)  # Using the custom OBV function
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
     
@@ -180,15 +151,15 @@ if symbol:
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'),
                   row=3, col=1)
 
+    fig.update_layout(title=f"{symbol} Stock Price and Technical Indicators",
+                      xaxis_title="Date", yaxis_title="Price")
     st.plotly_chart(fig)
 
-    # Display sentiment score
-    st.write(f"### Sentiment Score: **{sentiment_score:.2f}**")
-
-# Footer
-st.markdown("""
-    <div class="footer">
-        Created by **Shriyan Kandula** | 💻 Stock Predictions & Insights
-    </div>
-""", unsafe_allow_html=True)
-
+    # Displaying additional information
+    st.markdown("### Additional Technical Analysis")
+    st.write("**RSI** indicates if a stock is overbought (>70) or oversold (<30).")
+    st.write("**MACD** is used to identify changes in momentum.")
+    st.write("**On-Balance Volume** shows how volume is related to price movement.")
+    st.write("**SMA** indicates trend direction.")
+    
+    st.markdown("<br><br><div class='footer'>Made by Shriyan Kandula - Sophomore at Shaker High School.</div>", unsafe_allow_html=True)
