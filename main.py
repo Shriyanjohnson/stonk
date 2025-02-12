@@ -14,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
+import io
 
 # Custom OBV Implementation
 def custom_on_balance_volume(df):
@@ -32,7 +33,7 @@ def custom_on_balance_volume(df):
 @st.cache_data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
-    data = stock.history(period="90d")
+    data = stock.history(period="90d")  # Last 90 days of stock data
     # Technical Indicators
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
@@ -62,7 +63,7 @@ def fetch_sentiment(symbol):
 
 # Train Model with GridSearchCV
 @st.cache_resource
-def train_model(data, symbol):
+def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     features = data[['Close', 'RSI', 'MACD', 'Volatility', 'On_Balance_Volume', 'SMA_20', 'SMA_50']]
@@ -70,7 +71,7 @@ def train_model(data, symbol):
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
     X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)  # Model instantiation
     # GridSearchCV for tuning model parameters
     param_grid = {
         'n_estimators': [50, 100, 200],
@@ -86,46 +87,76 @@ def train_model(data, symbol):
 def generate_recommendation(data, sentiment_score, model, symbol):
     latest_data = data.iloc[-1]
     latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'],
-                                latest_data['On_Balance_Volume'], latest_data['SMA_20'], latest_data['SMA_50']]])
+                                 latest_data['On_Balance_Volume'], latest_data['SMA_20'], latest_data['SMA_50']]])
     prediction_prob = model.predict_proba(latest_features)[0][1]
     option = "Call" if prediction_prob > 0.5 else "Put"
+    # Use sentiment to adjust option
     if sentiment_score > 0.2 and option == "Put":
         option = "Call"
     elif sentiment_score < -0.2 and option == "Call":
         option = "Put"
+    
     strike_price = round(latest_data['Close'] / 10) * 10
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
-    return option, strike_price, expiration_date, latest_data
+    
+    # AI-driven analysis for better predictions
+    analysis = ""
+    if latest_data['RSI'] > 70:
+        analysis = "The stock is overbought, suggesting a possible price pullback."
+    elif latest_data['RSI'] < 30:
+        analysis = "The stock is oversold, potentially signaling an upward movement."
+    elif latest_data['MACD'] > 0:
+        analysis = "Positive momentum detected, a potential upward trend ahead."
+    elif latest_data['MACD'] < 0:
+        analysis = "Negative momentum detected, possibly signaling a downward trend."
+
+    return option, strike_price, expiration_date, latest_data, analysis
 
 # Streamlit UI
 st.markdown('<div class="title">💰 AI Stock Options Predictor 💰</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Developed by Shriyan Kandula, a sophomore at Shaker High School.</div>', unsafe_allow_html=True)
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
+
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
-    model, accuracy, X_test, y_test = train_model(stock_data, symbol)
+    model, accuracy, X_test, y_test = train_model(stock_data)
     current_price = stock_data['Close'].iloc[-1]
     st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
-    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
-    st.markdown(f"""<div class="recommendation">
-                        <h3>Option Recommendation: **{option}**</h3>
-                        <p>Strike Price: **${strike_price}**</p>
-                        <p>Expiration Date: **{expiration}**</p>
-                    </div>""", unsafe_allow_html=True)
+    
+    option, strike_price, expiration, latest_data, analysis = generate_recommendation(stock_data, sentiment_score, model, symbol)
+    
+    st.markdown(f""" 
+        <div class="recommendation"> 
+            <h3>Option Recommendation: **{option}**</h3> 
+            <p>Strike Price: **${strike_price}**</p> 
+            <p>Expiration Date: **{expiration}**</p> 
+            <p><b>AI-driven Analysis:</b> {analysis}</p>
+        </div>
+    """, unsafe_allow_html=True)
+
     st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-
+    
     # Displaying Technical Indicators
     st.subheader('Technical Indicators and Their Current Values')
-    st.write(f"**RSI** (Relative Strength Index): {latest_data['RSI']:.2f} - An RSI above 70 indicates overbought conditions, while below 30 indicates oversold.")
-    st.write(f"**MACD** (Moving Average Convergence Divergence): {latest_data['MACD']:.2f} - Indicates momentum. Positive values suggest upward momentum.")
-    st.write(f"**On-Balance Volume (OBV)**: {latest_data['On_Balance_Volume']:.2f} - Shows the cumulative buying and selling pressure.")
+    st.write(f"**RSI** (Relative Strength Index): {latest_data['RSI']:.2f}")
+    st.write(f"**MACD** (Moving Average Convergence Divergence): {latest_data['MACD']:.2f}")
+    st.write(f"**On-Balance Volume (OBV)**: {latest_data['On_Balance_Volume']:.2f}")
     st.write(f"**SMA-20** (Simple Moving Average - 20 days): {latest_data['SMA_20']:.2f}")
     st.write(f"**SMA-50** (Simple Moving Average - 50 days): {latest_data['SMA_50']:.2f}")
-    st.write(f"**Volatility** (Average True Range): {latest_data['Volatility']:.2f} - A measure of price fluctuations over a given period.")
-
+    st.write(f"**Volatility** (Average True Range): {latest_data['Volatility']:.2f}")
+    
+    # Downloadable data button
+    csv = stock_data.to_csv(index=True)
+    st.download_button(
+        label="Download Stock Data",
+        data=csv,
+        file_name=f"{symbol}_stock_data.csv",
+        mime="text/csv"
+    )
+    
     # Visualizations
     st.subheader('Stock Data and Technical Indicators')
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.02, subplot_titles=('Stock Price', 'RSI Indicator', 'MACD Indicator'))
@@ -135,29 +166,13 @@ if symbol:
     fig.update_layout(title=f"{symbol} Stock Price and Technical Indicators", xaxis_title="Date", yaxis_title="Price")
     st.plotly_chart(fig)
 
-    # Explanation of Model Superiority
-    st.markdown("""
-    ## Why This Model is Better Than Other Models:
-    - **Comprehensive Data Inputs**: This model combines not only traditional technical indicators (RSI, MACD, SMA) but also fundamental earnings data (EPS, revenue), which are crucial for predicting stock performance.
-    - **Sentiment Analysis**: Real-time sentiment analysis is incorporated, which helps understand market reactions and sentiment, thus enhancing decision-making.
-    - **Machine Learning with GridSearchCV**: We use Random Forest Classifier with hyperparameter tuning through GridSearchCV, making the model more accurate and tailored to the specific stock data.
-    - **Real-Time Adjustments**: This model reacts to real-time market conditions, taking into account the latest news and technical analysis to give actionable stock options recommendations.
-    - **User-Friendly UI**: The app presents the data and analysis in an easy-to-understand format, giving users insights into each recommendation and its underlying rationale.
+    # Key Features Section
+    st.subheader("🌟 Key Features That Make It Stand Out")
+    st.write("""
+        - **Advanced Machine Learning Models**: Uses XGBoost, Random Forest, and GridSearchCV to optimize predictions.
+        - **Comprehensive Technical Analysis**: Incorporates RSI, MACD, SMA, OBV, and other indicators to evaluate stock trends.
+        - **Real-time Sentiment Analysis**: Scrapes news and articles to assess sentiment for better recommendations.
+        - **AI-Driven Decision Support**: Gives actionable insights and recommendations for buy/sell options based on current stock data.
+        - **Downloadable Data**: Easily download the stock data as CSV for further analysis.
     """)
-
-# Displaying additional information
-st.markdown("### Additional Technical Analysis")
-st.write("**RSI** indicates if a stock is overbought (>70) or oversold (<30).")
-st.write("**MACD** is used to identify changes in momentum.")
-st.write("**On-Balance Volume** shows how volume is related to price movement.")
-st.write("**SMA** indicates trend direction.")
-
-# Key Features Section
-st.subheader("🌟 Key Features That Make It Stand Out")
-st.write(""" 
-- **Advanced Machine Learning Models**: Uses XGBoost, Random Forest, and GridSearchCV to optimize predictions.
-- **Comprehensive Technical Analysis**: Incorporates RSI, MACD, and OBV for a thorough understanding of price movements.
-- **Earnings and Sentiment Data**: Combines technical data with earnings (EPS, revenue) and sentiment analysis from financial news.
-- **User-Friendly Visualization**: Provides clear and informative visualizations of stock price trends and indicators.
-""")
 
