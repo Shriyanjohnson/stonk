@@ -1,96 +1,122 @@
+import yfinance as yf
+import streamlit as st
 import pandas as pd
 import numpy as np
-import streamlit as st
+import datetime
+import os
+import io
+from textblob import TextBlob
+from newsapi import NewsApiClient
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
-import pandas_ta as ta  # Using pandas_ta for technical indicators
-import yfinance as yf
-import requests
-from datetime import datetime, timedelta
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# API key for news
-NEWS_API_KEY = '833b7f0c6c7243b6b751715b243e4802'  # Replace with your actual API key
+# Set API Key
+API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
 
-# Function to fetch stock data
-def fetch_stock_data(ticker):
-    stock_data = yf.download(ticker, period='1y', interval='1d')
-    stock_data['RSI'] = ta.rsi(stock_data['Close'], length=14)
-    stock_data['ATR'] = ta.atr(stock_data['High'], stock_data['Low'], stock_data['Close'], length=14)
-    stock_data['OBV'] = ta.obv(stock_data['Close'], stock_data['Volume'])
-    stock_data['SMA_20'] = ta.sma(stock_data['Close'], length=20)
-    stock_data['SMA_50'] = ta.sma(stock_data['Close'], length=50)
-    stock_data['Earnings'] = get_earnings(ticker)  # Fetch earnings data
-    return stock_data.dropna()  # Drop rows with missing values
+# Custom On-Balance Volume (OBV) function
+def custom_on_balance_volume(df):
+    obv = [0]
+    for i in range(1, len(df)):
+        if df['Close'][i] > df['Close'][i - 1]:
+            obv.append(obv[-1] + df['Volume'][i])
+        elif df['Close'][i] < df['Close'][i - 1]:
+            obv.append(obv[-1] - df['Volume'][i])
+        else:
+            obv.append(obv[-1])
+    df['OBV'] = obv
+    return df
 
-# Function to get earnings data
-def get_earnings(ticker):
-    url = f'https://financialmodelingprep.com/api/v3/earnings_calendar?symbol={ticker}&apikey={NEWS_API_KEY}'
-    response = requests.get(url).json()
-    if response:
-        return response[0]['epsEstimated']  # Estimated EPS
-    return 0  # Return 0 if earnings data is not found
+# Fetch stock data
+@st.cache_data
+def fetch_stock_data(symbol):
+    stock = yf.Ticker(symbol)
+    data = stock.history(period="90d")
+    data['RSI'] = data['Close'].pct_change().rolling(14).mean()
+    data['ATR'] = (data['High'] - data['Low']).rolling(14).mean()
+    data = custom_on_balance_volume(data)
+    data['SMA_20'] = data['Close'].rolling(window=20).mean()
+    data['SMA_50'] = data['Close'].rolling(window=50).mean()
+    data.dropna(inplace=True)
+    return data
 
-# Function to train or update the model
-def train_or_update_model(stock_data, model=None):
-    features = stock_data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50', 'Earnings']]
-    labels = np.where(stock_data['Close'].shift(-1) > stock_data['Close'], 1, 0)  # Predict if price goes up
+# Fetch real-time stock price
+def fetch_real_time_price(symbol):
+    stock = yf.Ticker(symbol)
+    real_time_data = stock.history(period="1d", interval="1m")
+    return real_time_data['Close'][-1]  # Latest closing price
 
-    # Standardize the features
+# Fetch sentiment score from news articles
+@st.cache_data
+def fetch_sentiment(symbol):
+    try:
+        newsapi = NewsApiClient(api_key=API_KEY)
+        articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
+        if not articles:
+            return 0
+        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
+        return sentiment_score
+    except:
+        return 0
+
+# Train Machine Learning Model
+@st.cache_resource
+def train_model(data):
+    data['Price Change'] = data['Close'].diff()
+    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
+    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
+    labels = data['Target']
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
+    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
+    grid_search.fit(X_train, y_train)
+    best_model = grid_search.best_estimator_
+    return best_model, grid_search.best_score_ * 100, X_test, y_test
 
-    # Train the model if it's not already trained
-    if model is None:
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(features_scaled, labels)  # Train the model
-    else:
-        model.partial_fit(features_scaled, labels)  # Update the model incrementally
+# Option Recommendation Function
+def generate_recommendation(data, sentiment_score, model, symbol):
+    latest_data = data.iloc[-1]
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    prediction_prob = model.predict_proba(latest_features)[0][1]
+    option = "Call" if prediction_prob > 0.5 else "Put"
+    if sentiment_score > 0.2 and option == "Put":
+        option = "Call"
+    elif sentiment_score < -0.2 and option == "Call":
+        option = "Put"
+    strike_price = round(latest_data['Close'] / 10) * 10
+    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
+    return option, strike_price, expiration_date, latest_data
 
-    return model, features_scaled, labels
+# Streamlit UI
+st.title("💰 AI Stock Options Predictor 💰")
+symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
-# Function to predict with the model
-def predict(model, stock_data):
-    features = stock_data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50', 'Earnings']]
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-    prediction = model.predict(features_scaled[-1].reshape(1, -1))  # Use last data point for prediction
-    return 'Buy' if prediction == 1 else 'Sell'
+if symbol:
+    stock_data = fetch_stock_data(symbol)
+    sentiment_score = fetch_sentiment(symbol)
+    model, accuracy, X_test, y_test = train_model(stock_data)
+    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
 
-# Streamlit app layout
-st.title('Stock Prediction App')
+    # Fetch and display the real-time stock price
+    real_time_price = fetch_real_time_price(symbol)
 
-ticker = st.text_input('Enter Stock Ticker (e.g., AAPL)', 'AAPL')
-stock_data = fetch_stock_data(ticker)
+    st.subheader(f"📈 Option Recommendation for {symbol}")
+    st.write(f"**Recommended Option:** {option}")
+    st.write(f"**Strike Price:** ${strike_price}")
+    st.write(f"**Expiration Date:** {expiration}")
+    st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+    st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
 
-st.subheader('Stock Data')
-st.write(stock_data.tail())
+    st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
 
-# Train or update the model
-model, X_test, y_test = train_or_update_model(stock_data)
-
-# Predict the next action
-prediction = predict(model, stock_data)
-st.subheader(f'Prediction: {prediction}')
-
-# Show news headlines related to the stock
-st.subheader('Related News')
-news = get_news(ticker)
-for article in news:
-    st.write(f"**{article['title']}**")
-    st.write(f"[Read more]({article['url']})")
-
-# Function to fetch related news
-def get_news(ticker):
-    url = f'https://newsapi.org/v2/everything?q={ticker}&apiKey={NEWS_API_KEY}'
-    response = requests.get(url).json()
-    return response['articles'][:5]  # Return the top 5 news articles
-
-# Explain the model and features
-st.subheader('Model Explanation')
-st.write("""
-    The Random Forest Classifier was used for predicting stock price movements. 
-    It uses a set of technical indicators like RSI, ATR, OBV, and SMAs, as well as 
-    earnings data to make predictions. This allows the model to consider both 
-    historical price data and market sentiment (through earnings and news).
-""")
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
+    fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
+                                 low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
+    st.plotly_chart(fig)
