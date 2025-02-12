@@ -10,6 +10,8 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from sklearn.ensemble import GradientBoostingClassifier
+from xgboost import XGBClassifier
 
 # Set API Key
 API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
@@ -28,6 +30,7 @@ def custom_on_balance_volume(df):
     return df
 
 # Fetch stock data
+@st.cache_data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="90d")
@@ -39,27 +42,14 @@ def fetch_stock_data(symbol):
     data.dropna(inplace=True)
     return data
 
-# Fetch real-time stock price, including after-market hours
+# Fetch real-time stock price
 def fetch_real_time_price(symbol):
     stock = yf.Ticker(symbol)
-    
-    # Fetch the latest minute-by-minute data for the stock for a wider time window
-    try:
-        real_time_data = stock.history(period="1d", interval="1m")  # 1-minute interval for real-time data
-        
-        # Ensure that we get the most recent closing price (handling after-market hours)
-        latest_data = real_time_data['Close'][-1]
-        
-        # In case the data isn't available, we try to use the last available price
-        if pd.isna(latest_data):
-            latest_data = real_time_data['Close'].iloc[-2]  # Use the previous price if the latest is unavailable
-        
-        return latest_data
-    except Exception as e:
-        st.error(f"Error fetching real-time price: {str(e)}")
-        return None
+    real_time_data = stock.history(period="1d", interval="1m")
+    return real_time_data['Close'][-1]  # Latest closing price
 
 # Fetch sentiment score from news articles
+@st.cache_data
 def fetch_sentiment(symbol):
     try:
         newsapi = NewsApiClient(api_key=API_KEY)
@@ -72,6 +62,7 @@ def fetch_sentiment(symbol):
         return 0
 
 # Train Machine Learning Model
+@st.cache_resource
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
@@ -81,11 +72,10 @@ def train_model(data):
     features_scaled = scaler.fit_transform(features)
     X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
     
-    # Hyperparameter tuning with GridSearchCV
-    model = RandomForestClassifier(random_state=42)
-    grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
+    # Trying different models: Gradient Boosting & XGBoost
+    model = GradientBoostingClassifier(n_estimators=100, random_state=42)  # You can also try XGBClassifier here
+    grid_search = GridSearchCV(estimator=model, param_grid={'learning_rate': [0.01, 0.1, 0.5]}, cv=5, scoring='accuracy')
     grid_search.fit(X_train, y_train)
-    
     best_model = grid_search.best_estimator_
     return best_model, grid_search.best_score_ * 100, X_test, y_test
 
@@ -110,12 +100,10 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
-    
-    # Train or load model and evaluate
     model, accuracy, X_test, y_test = train_model(stock_data)
     option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
 
-    # Fetch and display the real-time stock price, including after-market
+    # Fetch and display the real-time stock price
     real_time_price = fetch_real_time_price(symbol)
 
     st.subheader(f"📈 Option Recommendation for {symbol}")
@@ -123,18 +111,12 @@ if symbol:
     st.write(f"**Strike Price:** ${strike_price}")
     st.write(f"**Expiration Date:** {expiration}")
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-    
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-    
-    if real_time_price:
-        st.write(f"### Real-Time Price (Including After-Market): **${real_time_price:.2f}**")
-    else:
-        st.write("### Real-Time Price: Data not available")
+    st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
 
     st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
 
-    # Plotting stock data with Plotly
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
     fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
