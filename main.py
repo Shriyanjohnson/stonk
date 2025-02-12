@@ -107,7 +107,7 @@ def generate_recommendation(data, sentiment_score, model):
     strike_price = round(latest_data['Close'] / 10) * 10
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
     
-    return option, strike_price, expiration_date
+    return option, strike_price, expiration_date, latest_data
 
 # Streamlit UI
 st.markdown('<div class="title">💰 AI Stock Options Predictor 💰</div>', unsafe_allow_html=True)
@@ -124,7 +124,7 @@ if symbol:
 
     st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
 
-    option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
+    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model)
 
     st.markdown(f"""
         <div class="recommendation">
@@ -137,6 +137,15 @@ if symbol:
     st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+
+    # Displaying Technical Indicators
+    st.subheader('Technical Indicators and Their Current Values')
+    st.write(f"**RSI** (Relative Strength Index): {latest_data['RSI']:.2f} - An RSI above 70 indicates overbought conditions, while below 30 indicates oversold.")
+    st.write(f"**MACD** (Moving Average Convergence Divergence): {latest_data['MACD']:.2f} - Indicates momentum. Positive values suggest upward momentum.")
+    st.write(f"**On-Balance Volume (OBV)**: {latest_data['On_Balance_Volume']:.2f} - Shows the cumulative buying and selling pressure.")
+    st.write(f"**SMA-20** (Simple Moving Average - 20 days): {latest_data['SMA_20']:.2f}")
+    st.write(f"**SMA-50** (Simple Moving Average - 50 days): {latest_data['SMA_50']:.2f}")
+    st.write(f"**Volatility** (Average True Range): {latest_data['Volatility']:.2f} - A measure of price fluctuations over a given period.")
 
     # Visualizations
     st.subheader('Stock Data and Technical Indicators')
