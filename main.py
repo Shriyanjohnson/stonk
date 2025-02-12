@@ -64,4 +64,64 @@ def generate_recommendation(data, sentiment_score, model):
         option = "Put"
     strike_price = round(latest_data['Close'] / 10) * 10
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()  # Friday expiry
-  
+    return option, strike_price, expiration_date
+
+# Streamlit UI
+st.title("💰 AI Stock Options Predictor 💰")
+st.image("https://media.istockphoto.com/id/184276818/photo/us-dollars-stack.webp?b=1&s=170667a&w=0&k=20&c=FgRD0szcZ1Z-vpMZtkmMl5m1lmjVxQ2FYr5FUzDfJmM=", caption="Let's Make Some Money!", use_container_width=True)
+
+# Stock input and data retrieval
+symbol = st.text_input("Enter Stock Symbol", "AAPL")
+if symbol:
+    stock_data = fetch_stock_data(symbol)
+    sentiment_score = fetch_sentiment(symbol)
+    model, accuracy, X_test, y_test = train_model(stock_data)  # Train model
+
+    # Generate option recommendation
+    option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
+
+    # Displaying Option Recommendation and Information
+    st.write(f"### Option Recommendation: **{option}**")
+    st.write(f"Strike Price: **${strike_price}**")
+    st.write(f"Expiration Date: **{expiration}**")
+
+    # Display Model Accuracy
+    st.markdown(f"### 🔥 Model Accuracy (Cross-Validation): **{accuracy:.2f}%**")
+
+    # Test accuracy on unseen data
+    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"### Model Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+
+    # Display Current Stock Price
+    current_price = stock_data['Close'][-1]
+    st.write(f"### Current Price of {symbol}: **${current_price:.2f}**")
+
+    # Plotting Stock Chart (Candlestick Chart)
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=stock_data.index,
+                                 open=stock_data['Open'],
+                                 high=stock_data['High'],
+                                 low=stock_data['Low'],
+                                 close=stock_data['Close'],
+                                 name='Market Data'))
+
+    # Adding Moving Averages (SMA & EMA)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='SMA 20', line=dict(color='red')))
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='SMA 50', line=dict(color='green')))
+
+    # Update Layout
+    fig.update_layout(title=f"{symbol} Stock Price Chart",
+                      xaxis_title='Date',
+                      yaxis_title='Stock Price',
+                      xaxis_rangeslider_visible=False)
+
+    # Show Chart
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Disclaimer
+    st.markdown(""" **Disclaimer:** This application is for informational purposes only and does not constitute financial advice. Please conduct your own due diligence before making any investment decisions. """)
+
+    # Footer
+    st.markdown("---")
+    st.markdown("### Created by **Shriyan K**")
+
