@@ -3,16 +3,18 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
+import os
+import io
 from textblob import TextBlob
 from newsapi import NewsApiClient
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Set API Key
-API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Your provided API key
+API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
 
 # Custom On-Balance Volume (OBV) function
 def custom_on_balance_volume(df):
@@ -27,7 +29,8 @@ def custom_on_balance_volume(df):
     df['OBV'] = obv
     return df
 
-# Fetch stock data with earnings
+# Fetch stock data
+@st.cache_data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="90d")
@@ -36,20 +39,7 @@ def fetch_stock_data(symbol):
     data = custom_on_balance_volume(data)
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
-
-    # Fetch earnings data (quarterly earnings per share)
-    try:
-        earnings_data = stock.earnings
-        if earnings_data is not None and len(earnings_data) > 0:
-            # Take the most recent earnings value
-            data['Earnings'] = earnings_data.iloc[0]['Earnings']
-        else:
-            data['Earnings'] = np.nan  # If earnings data is not available, set it as NaN
-    except Exception as e:
-        data['Earnings'] = np.nan  # If fetching earnings fails, set it as NaN
-
-    # Drop rows with NaN values and reset the index
-    data = data.dropna()
+    data.dropna(inplace=True)
     return data
 
 # Fetch real-time stock price
@@ -59,6 +49,7 @@ def fetch_real_time_price(symbol):
     return real_time_data['Close'][-1]  # Latest closing price
 
 # Fetch sentiment score from news articles
+@st.cache_data
 def fetch_sentiment(symbol):
     try:
         newsapi = NewsApiClient(api_key=API_KEY)
@@ -67,38 +58,49 @@ def fetch_sentiment(symbol):
             return 0
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
-    except:
+    except Exception as e:
         return 0
 
 # Train Machine Learning Model
+@st.cache_resource
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
-    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50', 'Earnings']]
-
-    # Drop any rows with NaN or infinite values in features before training the model
-    features = features.replace([np.inf, -np.inf], np.nan).dropna()
-
+    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
     labels = data['Target']
+    
+    # Handling potential issues with missing data
+    if features.isnull().any().any():
+        features = features.fillna(0)  # Fills missing values if any
+
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
+    
     X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
     model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
-    return model, X_test, y_test
+    
+    # Model training with hyperparameter optimization
+    grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
+    grid_search.fit(X_train, y_train)
+    best_model = grid_search.best_estimator_
+    
+    return best_model, grid_search.best_score_ * 100, X_test, y_test
 
 # Option Recommendation Function
 def generate_recommendation(data, sentiment_score, model, symbol):
     latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50'], latest_data['Earnings']]])
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
     prediction_prob = model.predict_proba(latest_features)[0][1]
     option = "Call" if prediction_prob > 0.5 else "Put"
+    
     if sentiment_score > 0.2 and option == "Put":
         option = "Call"
     elif sentiment_score < -0.2 and option == "Call":
         option = "Put"
+    
     strike_price = round(latest_data['Close'] / 10) * 10
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
+    
     return option, strike_price, expiration_date, latest_data
 
 # Streamlit UI
@@ -108,7 +110,7 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
-    model, X_test, y_test = train_model(stock_data)
+    model, accuracy, X_test, y_test = train_model(stock_data)
     option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
 
     # Fetch and display the real-time stock price
@@ -131,28 +133,24 @@ if symbol:
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
     st.plotly_chart(fig)
 
-# Bottom section explaining the functionality and models
-st.subheader("🔍 Explanation of the Model and Features")
+# Additional Explanation Section (Could be at the end of the app)
 st.write("""
-    This AI-powered stock prediction model utilizes machine learning algorithms to predict the best option (Call or Put) for a given stock based on historical data, technical indicators, and real-time sentiment from the news.
-    
-    **Key Features and Indicators:**
-    - **Close Price:** The stock's closing price.
-    - **RSI (Relative Strength Index):** A momentum oscillator that measures the speed and change of price movements.
-    - **ATR (Average True Range):** A measure of volatility.
-    - **OBV (On-Balance Volume):** A volume-based indicator to confirm price trends.
-    - **SMA (Simple Moving Average):** The average price over a specific period (20-day, 50-day).
-    - **Earnings:** The most recent earnings per share (EPS) reported by the company.
+### How the Model Works:
 
-    The model is trained using a **Random Forest Classifier**, a powerful ensemble machine learning algorithm that works by constructing multiple decision trees during training and outputs the mode of the classes (Call/Put) for classification problems.
+This model uses several key indicators to predict stock movements, focusing on technical analysis like RSI (Relative Strength Index), ATR (Average True Range), SMA (Simple Moving Average), and OBV (On-Balance Volume). Additionally, we incorporate **sentiment analysis** of recent news articles related to the stock symbol. 
 
-    **Why This Model is Better:**
-    - **Incorporates Real-Time Data:** Unlike traditional models, this one leverages both technical indicators and real-time news sentiment for more informed predictions.
-    - **Accurate & Dynamic:** The model is updated continuously with new data, making it adaptive and capable of adjusting to changing market conditions.
-    - **Earnings as a Metric:** Earnings data, a key financial indicator, is used to predict stock price movements, giving the model a more comprehensive view of the company's performance.
+The machine learning model used is a **Random Forest Classifier**. It is trained on historical stock data and can predict whether the stock's price will go up (Buy/Call) or down (Sell/Put) based on its recent performance and external news sentiment.
 
-    By combining various technical indicators, machine learning, and real-time sentiment, this tool provides you with data-driven insights for better trading decisions.
+The model is constantly updated, learning over time as it receives more data and can improve its accuracy. By analyzing stock price movements, technical indicators, and news sentiment, it makes predictions that help guide option recommendations.
+
+### Why This is Better Than Other Platforms:
+- **Comprehensive Data Sources**: It combines technical indicators, sentiment analysis, and real-time market data.
+- **Customizable**: Unlike other platforms, you can input your stock symbol and get tailored predictions and option recommendations.
+- **Accuracy**: The model continually learns from historical data and external news, improving its decision-making.
+
+### What's Next:
+- Incorporating earnings reports as part of the analysis.
+- More indicators and features to make predictions more accurate.
+- Further improvement in model accuracy and response time.
+
 """)
-
-
-    
