@@ -1,137 +1,124 @@
-import yfinance as yf
 import streamlit as st
 import pandas as pd
-import numpy as np
-import datetime
-import os
-import io
-from textblob import TextBlob
-from newsapi import NewsApiClient
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV
+import yfinance as yf
+import talib
+import requests
 from sklearn.preprocessing import StandardScaler
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from sklearn.linear_model import SGDClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import joblib
+from datetime import datetime, timedelta
 
-# Set API Key
-API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
+# User-defined constants
+STOCK_SYMBOL = 'AAPL'  # Example stock symbol
+API_KEY = '833b7f0c6c7243b6b751715b243e4802'  # News API Key
 
-# Custom On-Balance Volume (OBV) function
-def custom_on_balance_volume(df):
-    obv = [0]
-    for i in range(1, len(df)):
-        if df['Close'][i] > df['Close'][i - 1]:
-            obv.append(obv[-1] + df['Volume'][i])
-        elif df['Close'][i] < df['Close'][i - 1]:
-            obv.append(obv[-1] - df['Volume'][i])
-        else:
-            obv.append(obv[-1])
-    df['OBV'] = obv
-    return df
+# Function to fetch historical stock data
+def fetch_stock_data(stock_symbol, start_date):
+    stock_data = yf.download(stock_symbol, start=start_date)
+    return stock_data
 
-# Fetch stock data
-@st.cache_data
-def fetch_stock_data(symbol):
-    stock = yf.Ticker(symbol)
-    data = stock.history(period="90d")
-    data['RSI'] = data['Close'].pct_change().rolling(14).mean()
-    data['ATR'] = (data['High'] - data['Low']).rolling(14).mean()
-    data = custom_on_balance_volume(data)
-    data['SMA_20'] = data['Close'].rolling(window=20).mean()
-    data['SMA_50'] = data['Close'].rolling(window=50).mean()
-    data.dropna(inplace=True)
-    return data
-
-# Fetch real-time stock price
-def fetch_real_time_price(symbol):
-    stock = yf.Ticker(symbol)
-    real_time_data = stock.history(period="1d", interval="1m")
-    return real_time_data['Close'][-1]  # Latest closing price
-
-# Fetch sentiment score from news articles
-@st.cache_data
-def fetch_sentiment(symbol):
-    try:
-        newsapi = NewsApiClient(api_key=API_KEY)
-        articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
-        if not articles:
-            return 0
-        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
-        return sentiment_score
-    except Exception as e:
-        return 0
-
-# Train Machine Learning Model
-@st.cache_resource
-def train_model(data):
-    data['Price Change'] = data['Close'].diff()
-    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
-    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
-    labels = data['Target']
+# Function to fetch news data and perform sentiment analysis
+def fetch_news_data(stock_symbol):
+    url = f'https://newsapi.org/v2/everything?q={stock_symbol}&apiKey={API_KEY}'
+    response = requests.get(url)
+    news_data = response.json()
     
-    # Handling potential issues with missing data
-    if features.isnull().any().any():
-        features = features.fillna(0)  # Fills missing values if any
+    # Assuming sentiment is generated elsewhere (using a sentiment analysis model)
+    sentiment = 0  # This will be replaced by real sentiment data
+    if news_data['status'] == 'ok':
+        for article in news_data['articles']:
+            sentiment += get_sentiment(article['title'])
+    return sentiment
 
+# Placeholder for sentiment analysis function
+def get_sentiment(text):
+    # Placeholder sentiment score (use a proper sentiment model here)
+    return 1 if 'positive' in text.lower() else -1
+
+# Function to calculate technical indicators
+def calculate_indicators(stock_data):
+    stock_data['RSI'] = talib.RSI(stock_data['Close'], timeperiod=14)
+    stock_data['ATR'] = talib.ATR(stock_data['High'], stock_data['Low'], stock_data['Close'], timeperiod=14)
+    stock_data['OBV'] = talib.OBV(stock_data['Close'], stock_data['Volume'])
+    stock_data['SMA_20'] = talib.SMA(stock_data['Close'], timeperiod=20)
+    stock_data['SMA_50'] = talib.SMA(stock_data['Close'], timeperiod=50)
+    return stock_data
+
+# Function to train or update the model
+def train_or_update_model(stock_data, model=None):
+    # Add sentiment from news
+    sentiment = fetch_news_data(STOCK_SYMBOL)
+
+    # Create new features
+    stock_data = calculate_indicators(stock_data)
+    stock_data['Earnings'] = sentiment  # Placeholder for earnings data, replace with real earnings sentiment
+    stock_data = stock_data.dropna()
+
+    # Features and Labels
+    features = stock_data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50', 'Earnings']]
+    labels = (stock_data['Close'].shift(-1) > stock_data['Close']).astype(int)  # 1 if price goes up, else 0
+
+    # Feature Scaling
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
-    
-    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    
-    # Model training with hyperparameter optimization
-    grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
-    grid_search.fit(X_train, y_train)
-    best_model = grid_search.best_estimator_
-    
-    return best_model, grid_search.best_score_ * 100, X_test, y_test
 
-# Option Recommendation Function
-def generate_recommendation(data, sentiment_score, model, symbol):
-    latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
-    prediction_prob = model.predict_proba(latest_features)[0][1]
-    option = "Call" if prediction_prob > 0.5 else "Put"
-    
-    if sentiment_score > 0.2 and option == "Put":
-        option = "Call"
-    elif sentiment_score < -0.2 and option == "Call":
-        option = "Put"
-    
-    strike_price = round(latest_data['Close'] / 10) * 10
-    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
-    
-    return option, strike_price, expiration_date, latest_data
+    # Train-test split
+    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.2, random_state=42)
 
-# Streamlit UI
-st.title("💰 AI Stock Options Predictor 💰")
-symbol = st.text_input("Enter Stock Symbol", "AAPL")
+    # If no model is passed, train a new one, otherwise, update the existing one
+    if model is None:
+        model = SGDClassifier(loss='hinge', max_iter=1000, tol=1e-3)  # Using hinge loss for classification
+    model.fit(X_train, y_train)
 
-if symbol:
-    stock_data = fetch_stock_data(symbol)
-    sentiment_score = fetch_sentiment(symbol)
-    model, accuracy, X_test, y_test = train_model(stock_data)
-    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
+    # Test model accuracy
+    predictions = model.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
 
-    # Fetch and display the real-time stock price
-    real_time_price = fetch_real_time_price(symbol)
+    return model, accuracy
 
-    st.subheader(f"📈 Option Recommendation for {symbol}")
-    st.write(f"**Recommended Option:** {option}")
-    st.write(f"**Strike Price:** ${strike_price}")
-    st.write(f"**Expiration Date:** {expiration}")
-    st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-    test_accuracy = model.score(X_test, y_test) * 100
-    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-    st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
+# Function to save the model
+def save_model(model):
+    joblib.dump(model, 'stock_model.pkl')
 
-    st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
+# Function to load the model
+def load_model():
+    try:
+        model = joblib.load('stock_model.pkl')
+    except FileNotFoundError:
+        model = None  # If no model file, return None
+    return model
 
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
-    fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
-                                 low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
-    st.plotly_chart(fig)
+# Main function to run the app
+def main():
+    # Load the existing model (if any)
+    model = load_model()
+
+    # Fetch stock data from 3 months ago to present
+    stock_data = fetch_stock_data(STOCK_SYMBOL, (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d'))
+
+    # Train or update the model with the stock data
+    model, accuracy = train_or_update_model(stock_data, model)
+
+    # Save the updated model
+    save_model(model)
+
+    # Display the results
+    st.write(f"Model Accuracy: {accuracy * 100:.2f}%")
+
+    # Display prediction for the next day's stock movement
+    last_row = stock_data.iloc[-1]
+    features = [[last_row['Close'], last_row['RSI'], last_row['ATR'], last_row['OBV'], last_row['SMA_20'], last_row['SMA_50'], last_row['Earnings']]]
+    features_scaled = StandardScaler().fit_transform(features)
+    prediction = model.predict(features_scaled)
+    st.write("Predicted stock movement for tomorrow:", "Up" if prediction[0] == 1 else "Down")
+
+    # Additional functionality to visualize stock data, etc.
+    st.line_chart(stock_data['Close'])
+
+if __name__ == '__main__':
+    main()
 
 # Additional Explanation Section (Could be at the end of the app)
 st.write("""
