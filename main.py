@@ -62,10 +62,10 @@ def fetch_stock_data(symbol):
     # Technical Indicators
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
-    data['OBV'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
     data['Volatility'] = data['Close'].pct_change().rolling(10).std()
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
+    data['OBV'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
     
     # Handle NaN values
     data.dropna(inplace=True)
@@ -91,7 +91,7 @@ def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     
-    features = data[['Close', 'RSI', 'MACD', 'OBV', 'Volatility', 'SMA_20', 'SMA_50']]
+    features = data[['Close', 'RSI', 'MACD', 'Volatility', 'SMA_20', 'SMA_50', 'OBV']]
     labels = data['Target']
     
     scaler = StandardScaler()
@@ -108,7 +108,7 @@ def train_model(data):
 # Option Recommendation Function
 def generate_recommendation(data, sentiment_score, model):
     latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['OBV'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50'], latest_data['OBV']]])
     
     prediction_prob = model.predict_proba(latest_features)[0][1]
     option = "Call" if prediction_prob > 0.5 else "Put"
@@ -152,25 +152,18 @@ if symbol:
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
 
-    # Show charts for stock data and technical indicators
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
-
-    # Price chart
-    fig.add_trace(go.Candlestick(x=stock_data.index,
-                                open=stock_data['Open'], high=stock_data['High'],
-                                low=stock_data['Low'], close=stock_data['Close'], name='Candlesticks'),
-                  row=1, col=1)
-
-    # Indicators chart
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'), row=2, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='SMA 20'), row=2, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='SMA 50'), row=2, col=1)
+    # Plotting Data for Visualization
+    fig = make_subplots(rows=2, cols=2, subplot_titles=("RSI", "MACD", "Volume", "Close Price"))
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], name="RSI"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], name="MACD"), row=1, col=2)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Volume'], name="Volume"), row=2, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], name="Close Price"), row=2, col=2)
+    fig.update_layout(title="Stock Data with Indicators", height=800)
     
-    st.plotly_chart(fig)
+    # Downloading the data as CSV
+    st.download_button("Download Stock Data as CSV", data=stock_data.to_csv().encode(), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
 
-    # Option to download stock data as CSV
-    st.download_button(label="Download Stock Data as CSV", data=stock_data.to_csv().encode('utf-8'), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
+    st.plotly_chart(fig)
 
 # Footer
 st.markdown("""
