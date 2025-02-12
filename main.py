@@ -13,6 +13,76 @@ import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+# Custom HTML and CSS styling
+st.markdown("""
+    <style>
+        body {
+            background-color: #f5f5f5;
+            font-family: 'Arial', sans-serif;
+        }
+        .title {
+            text-align: center;
+            color: #2c3e50;
+            font-size: 36px;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+        .header {
+            color: #2c3e50;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .subheader {
+            font-size: 18px;
+            color: #34495e;
+        }
+        .stock-input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 18px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        .recommendation {
+            padding: 20px;
+            background-color: #ecf0f1;
+            border-radius: 8px;
+            margin-top: 30px;
+            text-align: center;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .recommendation h3 {
+            color: #e74c3c;
+            font-size: 22px;
+        }
+        .footer {
+            text-align: center;
+            color: #7f8c8d;
+            margin-top: 50px;
+            font-size: 16px;
+        }
+        .download-btn {
+            background-color: #3498db;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .download-btn:hover {
+            background-color: #2980b9;
+        }
+        .disclaimer {
+            font-size: 14px;
+            color: #95a5a6;
+            text-align: center;
+            margin-top: 30px;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # Function to fetch stock data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
@@ -76,11 +146,12 @@ def generate_recommendation(data, sentiment_score, model):
     return option, strike_price, expiration_date
 
 # Streamlit UI setup
-st.title("💰 AI Stock Options Predictor 💰")
+st.markdown('<div class="title">💰 AI Stock Options Predictor 💰</div>', unsafe_allow_html=True)
 st.image("https://media.istockphoto.com/id/184276818/photo/us-dollars-stack.webp?b=1&s=170667a&w=0&k=20&c=FgRD0szcZ1Z-vpMZtkmMl5m1lmjVxQ2FYr5FUzDfJmM=", caption="Let's Make Some Money!", use_container_width=True)
 
 # Stock input and data retrieval
-symbol = st.text_input("Enter Stock Symbol", "AAPL")
+symbol = st.text_input("Enter Stock Symbol", "AAPL", key="stock_input", help="Enter the stock symbol (e.g., AAPL, TSLA)")
+
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
@@ -89,10 +160,14 @@ if symbol:
     # Generate option recommendation
     option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
 
-    # Display Option Recommendation and Information
-    st.write(f"### Option Recommendation: **{option}**")
-    st.write(f"Strike Price: **${strike_price}**")
-    st.write(f"Expiration Date: **{expiration}**")
+    # Display Option Recommendation in a styled box
+    st.markdown(f"""
+        <div class="recommendation">
+            <h3>Option Recommendation: **{option}**</h3>
+            <p>Strike Price: **${strike_price}**</p>
+            <p>Expiration Date: **{expiration}**</p>
+        </div>
+    """, unsafe_allow_html=True)
 
     # Display Model Accuracy
     st.markdown(f"### 🔥 Model Accuracy (Cross-Validation): **{accuracy:.2f}%**")
@@ -167,17 +242,16 @@ if symbol:
 
     # Add download button for the data
     csv = stock_data.to_csv(index=True)  # Convert data to CSV format
-    st.download_button(
-        label="Download Stock Data",
-        data=csv,
-        file_name=f"{symbol}_stock_data.csv",
-        mime="text/csv",
-    )
+    st.markdown(f"""
+        <button class="download-btn" onclick="window.location.href='data:text/csv;charset=utf-8,{csv}'">
+            Download Stock Data
+        </button>
+    """, unsafe_allow_html=True)
 
 # Disclaimer
 st.markdown(""" 
-    **Disclaimer:** This application is for informational purposes only and does not constitute financial advice. Please conduct your own due diligence before making any investment decisions.
-""")
+    <div class="disclaimer">**Disclaimer:** This application is for informational purposes only and does not constitute financial advice. Please conduct your own due diligence before making any investment decisions.</div>
+""", unsafe_allow_html=True)
+
 # Footer
-st.markdown("---")
-st.markdown("### Created by **Shriyan K**")
+st.markdown('<div class="footer">Created by **Shriyan K**</div>', unsafe_allow_html=True)
