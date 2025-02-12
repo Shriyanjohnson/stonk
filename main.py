@@ -184,6 +184,6 @@ st.write("""
 - **Thorough Explanations**: Provides insights into each indicator and model accuracy.
 - **Built for Accuracy**: Implements hyperparameter tuning and real-time data.
 
-🚀 **Your app is a powerful AI-driven stock trading assistant that combines ML, technical indicators, and sentiment analysis to provide accurate, actionable insights. It’s more than just a predictor—it’s a decision-making tool for traders. 🔥**
+🚀 **The app is a powerful AI-driven stock trading assistant that combines ML, technical indicators, and sentiment analysis to provide accurate, actionable insights. It’s more than just a predictor—it’s a decision-making tool for traders. 🔥**
 """)
 
