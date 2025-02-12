@@ -1,10 +1,13 @@
 numpy
-pandas_ta (only if you're using technical analysis functions from it)
+pandas_ta
 yfinance
 scikit-learn
 pandas
 plotly
 textblob
+beautifulsoup4
+requests
 streamlit
+
 
 
