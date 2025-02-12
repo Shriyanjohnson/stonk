@@ -1,175 +1,194 @@
 import yfinance as yf
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from ta.momentum import RSIIndicator, StochasticOscillator
-from ta.trend import MACD, EMAIndicator
-from ta.volatility import BollingerBands, AverageTrueRange
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-from sklearn.metrics import accuracy_score
-import xgboost as xgb
+import streamlit as st
+from ta.momentum import RSIIndicator
+from ta.trend import MACD
+from ta.volatility import AverageTrueRange
+from ta.volume import OnBalanceVolume
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
-import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+import pandas as pd
+import os
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sklearn.preprocessing import StandardScaler
 import seaborn as sns
+import matplotlib.pyplot as plt
 
-# Constants
-symbol = 'AAPL'
-lookback = 90  # Lookback period in days
-test_size = 0.2  # Test size percentage
-n_estimators = 200  # Number of estimators for Random Forest
+# Custom HTML & CSS Styling
+st.markdown("""
+    <style>
+        .title {
+            text-align: center;
+            color: #ecf0f1;
+            font-size: 36px;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #bdc3c7;
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        .current-price, .recommendation {
+            padding: 20px;
+            background-color: #ecf0f1;
+            border-radius: 8px;
+            margin-top: 30px;
+            text-align: center;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+            font-size: 24px;
+            color: #2c3e50;
+        }
+        .recommendation h3 {
+            color: #e74c3c;
+            font-size: 22px;
+        }
+        .footer {
+            text-align: center;
+            color: #7f8c8d;
+            margin-top: 50px;
+            font-size: 16px;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
-# Fetching the stock data
-@st.cache
-def fetch_stock_data(symbol, lookback):
+# Function to fetch stock data
+@st.cache_data
+def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
-    data = stock.history(period=f"{lookback}d")
+    data = stock.history(period="90d")
     
-    # Technical indicators
+    # Technical Indicators
     data['RSI'] = RSIIndicator(data['Close']).rsi()
-    data['MACD'] = MACD(data['Close']).macd_diff()
+    data['MACD'] = MACD(data['Close']).macd()
+    data['Volatility'] = AverageTrueRange(data['High'], data['Low'], data['Close']).average_true_range()
+    data['On_Balance_Volume'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
-    data['EMA_10'] = EMAIndicator(data['Close'], window=10).ema_indicator()
-    data['EMA_50'] = EMAIndicator(data['Close'], window=50).ema_indicator()
-    data['Bollinger_High'] = BollingerBands(data['Close']).bollinger_hband()
-    data['Bollinger_Low'] = BollingerBands(data['Close']).bollinger_lband()
-    data['ATR'] = AverageTrueRange(data['High'], data['Low'], data['Close']).average_true_range()
-    data['Stochastic'] = StochasticOscillator(data['High'], data['Low'], data['Close']).stoch()
-
-    # Custom OBV calculation (if ta.volume doesn't work)
-    data = on_balance_volume(data)
     
+    # Handle NaN values
     data.dropna(inplace=True)
     return data
 
-# Custom OBV Function
-def on_balance_volume(df):
-    """
-    Calculate the On-Balance Volume (OBV) for a given DataFrame with stock data.
-    """
-    obv = [0]  # Initialize OBV list with 0
-    for i in range(1, len(df)):
-        if df['Close'][i] > df['Close'][i-1]:
-            obv.append(obv[-1] + df['Volume'][i])  # Volume added to OBV if the close price is higher
-        elif df['Close'][i] < df['Close'][i-1]:
-            obv.append(obv[-1] - df['Volume'][i])  # Volume subtracted from OBV if the close price is lower
-        else:
-            obv.append(obv[-1])  # No change if the close price is the same
-    df['OBV'] = obv
-    return df
+# Function to fetch sentiment score
+@st.cache_data
+def fetch_sentiment(symbol):
+    try:
+        api_key = os.getenv("NEWSAPI_KEY")
+        if not api_key:
+            return 0
+        newsapi = NewsApiClient(api_key=api_key)
+        articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
+        if not articles:
+            return 0
+        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
+        return sentiment_score
+    except:
+        return 0
 
-# Fetch the data
-data = fetch_stock_data(symbol, lookback)
-
-# Feature Engineering
-features = ['RSI', 'MACD', 'SMA_20', 'SMA_50', 'EMA_10', 'EMA_50', 'Bollinger_High', 'Bollinger_Low', 'ATR', 'Stochastic', 'OBV']
-X = data[features]
-y = (data['Close'].shift(-1) > data['Close']).astype(int)  # 1 for up, 0 for down (next day's close)
-
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, shuffle=False)
-
-# Hyperparameter Tuning for Random Forest and XGBoost
-param_grid = {
-    'n_estimators': [100, 200, 300],
-    'max_depth': [10, 20, 30],
-    'min_samples_split': [2, 5, 10],
-    'min_samples_leaf': [1, 2, 4]
-}
-
-# Random Forest Classifier
-rf_model = RandomForestClassifier(random_state=42)
-
-# XGBoost Classifier
-xgb_model = xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-
-# GridSearchCV for Random Forest
-grid_search_rf = GridSearchCV(rf_model, param_grid, cv=5, n_jobs=-1, verbose=2)
-grid_search_rf.fit(X_train, y_train)
-
-# GridSearchCV for XGBoost
-grid_search_xgb = GridSearchCV(xgb_model, param_grid, cv=5, n_jobs=-1, verbose=2)
-grid_search_xgb.fit(X_train, y_train)
-
-# Best Models
-best_rf_model = grid_search_rf.best_estimator_
-best_xgb_model = grid_search_xgb.best_estimator_
-
-# Ensemble Method: Voting Classifier
-ensemble_model = VotingClassifier(estimators=[('rf', best_rf_model), ('xgb', best_xgb_model)], voting='hard')
-ensemble_model.fit(X_train, y_train)
-
-# Model Evaluation
-y_pred = ensemble_model.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred) * 100
-
-# Results
-st.write(f"### Test Accuracy: **{accuracy:.2f}%**")
-
-# Feature Importance Plot for Random Forest
-importance = best_rf_model.feature_importances_
-feature_importance = pd.DataFrame({'Feature': features, 'Importance': importance})
-feature_importance = feature_importance.sort_values(by='Importance', ascending=False)
-
-fig = plt.figure(figsize=(10, 6))
-sns.barplot(x='Importance', y='Feature', data=feature_importance)
-st.pyplot(fig)
-
-# Fetching latest news and performing sentiment analysis
-def fetch_news_sentiment(symbol):
-    newsapi = NewsApiClient(api_key='833b7f0c6c7243b6b751715b243e4802')
-    today = datetime.date.today()
-    articles = newsapi.get_everything(q=symbol, from_param=today, to=today, language='en', sort_by='relevancy')
-    headlines = [article['title'] for article in articles['articles']]
+# Train Model with GridSearchCV
+@st.cache_resource
+def train_model(data):
+    data['Price Change'] = data['Close'].diff()
+    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     
-    sentiment_scores = []
-    for headline in headlines:
-        sentiment = TextBlob(headline).sentiment.polarity
-        sentiment_scores.append(sentiment)
-        
-    average_sentiment = np.mean(sentiment_scores)
-    return average_sentiment
+    features = data[['Close', 'RSI', 'MACD', 'Volatility', 'On_Balance_Volume', 'SMA_20', 'SMA_50']]
+    labels = data['Target']
+    
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
 
-# Calculate news sentiment for AAPL
-sentiment = fetch_news_sentiment(symbol)
+    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
+    
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    
+    # GridSearchCV for tuning model parameters
+    param_grid = {
+        'n_estimators': [50, 100, 200],
+        'max_depth': [None, 10, 20, 30],
+        'min_samples_split': [2, 5, 10]
+    }
+    
+    grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5, scoring='accuracy')
+    grid_search.fit(X_train, y_train)
+    
+    best_model = grid_search.best_estimator_
+    return best_model, grid_search.best_score_ * 100, X_test, y_test
 
-# Show sentiment
-st.write(f"### Sentiment for {symbol}: {sentiment:.2f}")
+# Option Recommendation Function
+def generate_recommendation(data, sentiment_score, model):
+    latest_data = data.iloc[-1]
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['On_Balance_Volume'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    
+    prediction_prob = model.predict_proba(latest_features)[0][1]
+    option = "Call" if prediction_prob > 0.5 else "Put"
 
-# Visualizations
-fig = go.Figure(data=[go.Candlestick(x=data.index,
-                                    open=data['Open'],
-                                    high=data['High'],
-                                    low=data['Low'],
-                                    close=data['Close'],
-                                    name='Candlestick'),
-                     go.Scatter(x=data.index, y=data['SMA_20'], line=dict(color='orange', width=1), name='SMA 20'),
-                     go.Scatter(x=data.index, y=data['SMA_50'], line=dict(color='blue', width=1), name='SMA 50')])
+    if sentiment_score > 0.2 and option == "Put":
+        option = "Call"
+    elif sentiment_score < -0.2 and option == "Call":
+        option = "Put"
+    
+    strike_price = round(latest_data['Close'] / 10) * 10
+    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
+    
+    return option, strike_price, expiration_date
 
-fig.update_layout(title=f'{symbol} Stock Price Analysis with Indicators', xaxis_title='Date', yaxis_title='Price')
-st.plotly_chart(fig)
+# Streamlit UI
+st.markdown('<div class="title">💰 AI Stock Options Predictor 💰</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Developed by Shriyan Kandula, a sophomore at Shaker High School.</div>', unsafe_allow_html=True)
 
-# Explanation
-st.write("""
-### Explanation of Results:
-1. **RSI (Relative Strength Index)**: This indicates whether a stock is overbought (>70) or oversold (<30).
-2. **MACD (Moving Average Convergence Divergence)**: Shows the difference between short-term and long-term moving averages.
-3. **SMA (Simple Moving Average)**: Averages the stock price over a fixed window (e.g., 20 or 50 days).
-4. **EMA (Exponential Moving Average)**: Similar to SMA but gives more weight to recent prices.
-5. **Bollinger Bands**: Show volatility and overbought/oversold conditions.
-6. **ATR (Average True Range)**: Measures market volatility.
-7. **Stochastic Oscillator**: Compares a stock's closing price to its price range over a certain period.
-8. **OBV (On-Balance Volume)**: Tracks volume flow to help confirm price trends.
-9. **Sentiment Analysis**: News sentiment is captured from headlines and used to assess the market mood.
-10. **Accuracy**: This percentage indicates how well the model performs on unseen test data. A higher value means better predictive power.
-""")
+symbol = st.text_input("Enter Stock Symbol", "AAPL")
+
+if symbol:
+    stock_data = fetch_stock_data(symbol)
+    sentiment_score = fetch_sentiment(symbol)
+    model, accuracy, X_test, y_test = train_model(stock_data)
+
+    current_price = stock_data['Close'].iloc[-1]
+
+    st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
+
+    option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
+
+    st.markdown(f"""
+        <div class="recommendation">
+            <h3>Option Recommendation: **{option}**</h3>
+            <p>Strike Price: **${strike_price}**</p>
+            <p>Expiration Date: **{expiration}**</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+
+    # Visualizations
+    st.subheader('Stock Data and Technical Indicators')
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.02,
+                        subplot_titles=('Stock Price', 'RSI Indicator', 'MACD Indicator'))
+
+    fig.add_trace(go.Candlestick(x=stock_data.index,
+                open=stock_data['Open'], high=stock_data['High'], low=stock_data['Low'], close=stock_data['Close']),
+                row=1, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'),
+                  row=2, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'),
+                  row=3, col=1)
+
+    st.plotly_chart(fig)
+
+    # Display sentiment score
+    st.write(f"### Sentiment Score: **{sentiment_score:.2f}**")
 
 # Footer
-st.write("""
---- 
-Created by: **Shriyan Kandula**, a Sophomore at Shaker High School. This stock prediction model uses machine learning and technical analysis to provide insights into market trends.
-""")
+st.markdown("""
+    <div class="footer">
+        Created by **Shriyan Kandula** | 💻 Stock Predictions & Insights
+    </div>
+""", unsafe_allow_html=True)
 
