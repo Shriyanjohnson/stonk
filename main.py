@@ -92,6 +92,22 @@ def train_or_update_model(data, eps, model=None):
     accuracy = model.score(features_scaled, labels) * 100
     return model, accuracy
 
+# Generate options prediction (call/put, strike price, and expiration date)
+def generate_options_prediction(current_price, model, features):
+    # Predict the price movement (1 for up, 0 for down)
+    prediction = model.predict(features)
+    predicted_movement = "call" if prediction[-1] == 1 else "put"
+    
+    # Define strike price based on predicted movement
+    strike_price = current_price * 1.05 if predicted_movement == "call" else current_price * 0.95
+    
+    # Get the expiration date (next Friday)
+    today = datetime.date.today()
+    days_until_friday = (4 - today.weekday()) % 7  # Friday is weekday 4
+    expiration_date = today + datetime.timedelta(days=days_until_friday)
+    
+    return predicted_movement, strike_price, expiration_date
+
 # Streamlit UI
 st.markdown("<h1 style='color: white;'>💰 AI Stock Options Predictor 💰</h1>", unsafe_allow_html=True)
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
@@ -130,6 +146,16 @@ if symbol:
     else:
         st.write("### EPS: Not available")
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+
+    # Prepare features for options prediction
+    features = stock_data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']].iloc[-1:].values
+    
+    # Generate options prediction (call/put, strike price, and expiration date)
+    predicted_movement, strike_price, expiration_date = generate_options_prediction(real_time_price, model, features)
+    
+    st.write(f"### Predicted Option: **{predicted_movement.upper()}**")
+    st.write(f"### Strike Price: **${strike_price:.2f}**")
+    st.write(f"### Expiration Date: **{expiration_date}**")
 
     # Charts
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("Stock Price", "RSI", "OBV"))
