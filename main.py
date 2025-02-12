@@ -1,140 +1,160 @@
+import yfinance as yf
 import streamlit as st
+import pandas_ta as ta
 import pandas as pd
 import numpy as np
-import yfinance as yf
 import datetime
-import plotly.graph_objects as go
+import os
+import io
+from textblob import TextBlob
+from newsapi import NewsApiClient
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.metrics import accuracy_score
-import talib as ta
-from textblob import TextBlob
-import requests
-from bs4 import BeautifulSoup
+from sklearn.preprocessing import StandardScaler
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# 📌 Streamlit App Title
-st.set_page_config(page_title="S&P 500 Prediction & Options", layout="wide")
-st.title("📈 S&P 500 Prediction & Option Recommendations")
-
-# 📌 Sidebar: Date Selection
-st.sidebar.header("Select Date Range")
-start_date = st.sidebar.date_input("Start Date", datetime.date(2022, 1, 1))
-end_date = st.sidebar.date_input("End Date", datetime.date.today())
-
-# 📌 Fetch S&P 500 Data
-@st.cache_data
-def load_data():
-    df = yf.download("^GSPC", start=start_date, end=end_date)
-    df["RSI"] = ta.RSI(df["Close"], timeperiod=14)
-    df["MACD"], df["MACD_Signal"], _ = ta.MACD(df["Close"], fastperiod=12, slowperiod=26, signalperiod=9)
-    df["On_Balance_Volume"] = df["Volume"].cumsum()
-    df["SMA_20"] = ta.SMA(df["Close"], timeperiod=20)
-    df["SMA_50"] = ta.SMA(df["Close"], timeperiod=50)
-    df["Volatility"] = ta.ATR(df["High"], df["Low"], df["Close"], timeperiod=14)
-    df.dropna(inplace=True)
+# Custom On-Balance Volume (OBV) function
+def custom_on_balance_volume(df):
+    obv = [0]
+    for i in range(1, len(df)):
+        if df['Close'][i] > df['Close'][i - 1]:
+            obv.append(obv[-1] + df['Volume'][i])
+        elif df['Close'][i] < df['Close'][i - 1]:
+            obv.append(obv[-1] - df['Volume'][i])
+        else:
+            obv.append(obv[-1])
+    df['OBV'] = obv
     return df
 
-df = load_data()
+# Fetch stock data
+@st.cache_data
+def fetch_stock_data(symbol):
+    stock = yf.Ticker(symbol)
+    data = stock.history(period="90d")
 
-# 📊 Display Data & Candlestick Chart
-st.subheader("📉 S&P 500 Historical Data & Indicators")
-st.write(df.tail(10))
+    # Calculate Technical Indicators using pandas_ta
+    data['RSI'] = ta.rsi(data['Close'], length=14)
+    macd = ta.macd(data['Close'])
+    data['MACD'] = macd['MACD_12_26_9']
+    data['ATR'] = ta.atr(data['High'], data['Low'], data['Close'], length=14)
+    data = custom_on_balance_volume(data)
+    data['SMA_20'] = data['Close'].rolling(window=20).mean()
+    data['SMA_50'] = data['Close'].rolling(window=50).mean()
 
-fig = go.Figure(data=[go.Candlestick(
-    x=df.index,
-    open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-    name="S&P 500")])
-fig.update_layout(title="S&P 500 Candlestick Chart", xaxis_title="Date", yaxis_title="Price")
-st.plotly_chart(fig)
+    data.dropna(inplace=True)
+    return data
 
-# 📌 Feature Engineering for Model
-df["Target"] = np.where(df["Close"].shift(-1) > df["Close"], 1, 0)
-X = df[["RSI", "MACD", "On_Balance_Volume", "SMA_20", "SMA_50", "Volatility"]]
-y = df["Target"]
+# Fetch sentiment score from news articles
+@st.cache_data
+def fetch_sentiment(symbol):
+    try:
+        api_key = os.getenv("NEWSAPI_KEY")
+        if not api_key:
+            return 0
+        newsapi = NewsApiClient(api_key=api_key)
+        articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
+        if not articles:
+            return 0
+        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
+        return sentiment_score
+    except:
+        return 0
 
-# 📌 Train Model
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-rf = RandomForestClassifier()
-params = {"n_estimators": [50, 100, 200], "max_depth": [5, 10, 20]}
-grid_search = GridSearchCV(rf, params, cv=5)
-grid_search.fit(X_train, y_train)
+# Train Machine Learning Model
+@st.cache_resource
+def train_model(data):
+    data['Price Change'] = data['Close'].diff()
+    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
 
-best_model = grid_search.best_estimator_
-y_pred = best_model.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred)
+    features = data[['Close', 'RSI', 'MACD', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
+    labels = data['Target']
 
-# 📌 Display Prediction Accuracy
-st.subheader("📊 Model Performance")
-st.write(f"🔍 **Prediction Accuracy:** {accuracy:.2%}")
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
 
-# 📌 Current Market Indicators Display
-latest_data = df.iloc[-1]
-st.subheader('📊 Technical Indicators and Their Current Values')
+    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
 
-st.write(f"""
-- **RSI (Relative Strength Index)**: {latest_data['RSI']:.2f}
-  - RSI measures price momentum on a 0-100 scale.
-  - **Above 70** = Overbought (potential reversal).  
-  - **Below 30** = Oversold (potential buying opportunity).
+    param_grid = {
+        'n_estimators': [50, 100, 200],
+        'max_depth': [None, 10, 20, 30],
+        'min_samples_split': [2, 5, 10]
+    }
 
-- **MACD (Moving Average Convergence Divergence)**: {latest_data['MACD']:.2f}
-  - Trend-following momentum indicator (relationship between 12-day & 26-day EMAs).  
-  - **Positive MACD** = Bullish trend.  
-  - **Negative MACD** = Bearish trend.
+    grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5, scoring='accuracy')
+    grid_search.fit(X_train, y_train)
+    best_model = grid_search.best_estimator_
 
-- **On-Balance Volume (OBV)**: {latest_data['On_Balance_Volume']:.2f}
-  - OBV measures volume flow to confirm trends.  
-  - Rising OBV supports an **uptrend**, declining OBV may indicate **weakening momentum**.
+    return best_model, grid_search.best_score_ * 100, X_test, y_test
 
-- **SMA-20 & SMA-50 (Simple Moving Averages)**:
-  - **SMA-20** (Short-term trend): {latest_data['SMA_20']:.2f}  
-  - **SMA-50** (Longer-term trend): {latest_data['SMA_50']:.2f}  
-  - If **SMA-20 > SMA-50**, it’s a **bullish signal**. If **SMA-20 < SMA-50**, it’s **bearish**.
+# Option Recommendation Function
+def generate_recommendation(data, sentiment_score, model, symbol):
+    latest_data = data.iloc[-1]
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['ATR'],
+                                 latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    prediction_prob = model.predict_proba(latest_features)[0][1]
+    option = "Call" if prediction_prob > 0.5 else "Put"
 
-- **Volatility (ATR - Average True Range)**: {latest_data['Volatility']:.2f}
-  - High ATR = **high volatility (uncertainty)**, Low ATR = **stable trend**.
-""")
+    if sentiment_score > 0.2 and option == "Put":
+        option = "Call"
+    elif sentiment_score < -0.2 and option == "Call":
+        option = "Put"
 
-# 📌 Predict Next Day Movement
-predicted_movement = best_model.predict([latest_data[["RSI", "MACD", "On_Balance_Volume", "SMA_20", "SMA_50", "Volatility"]]])[0]
-prediction_text = "📈 Expected to go UP" if predicted_movement == 1 else "📉 Expected to go DOWN"
-st.subheader("🔮 AI Market Prediction")
-st.write(prediction_text)
+    strike_price = round(latest_data['Close'] / 10) * 10
+    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
 
-# 📌 Option Strategy Recommendation
-strike_price = round(latest_data["Close"] * (1.02 if predicted_movement == 1 else 0.98), 2)
-option_type = "Call" if predicted_movement == 1 else "Put"
-expiration_date = datetime.date.today() + datetime.timedelta((4 - datetime.date.today().weekday()) % 7)
+    analysis = ""
+    if latest_data['RSI'] > 70:
+        analysis = "The stock is overbought, suggesting a possible price pullback."
+    elif latest_data['RSI'] < 30:
+        analysis = "The stock is oversold, potentially signaling an upward movement."
+    elif latest_data['MACD'] > 0:
+        analysis = "Positive momentum detected, a potential upward trend ahead."
+    elif latest_data['MACD'] < 0:
+        analysis = "Negative momentum detected, possibly signaling a downward trend."
 
-st.subheader("📌 Suggested Option Trade")
-st.write(f"""
-- **Option Type:** {option_type}  
-- **Strike Price:** {strike_price}  
-- **Expiration Date:** {expiration_date}  
-""")
+    return option, strike_price, expiration_date, latest_data, analysis
 
-# 📌 News Sentiment Analysis
-st.subheader("📰 Market Sentiment Analysis")
-news_url = "https://www.cnbc.com/stocks/"
-news_page = requests.get(news_url)
-soup = BeautifulSoup(news_page.content, "html.parser")
-headlines = soup.find_all("a", class_="LatestNews-headline", limit=5)
+# Streamlit UI
+st.title("💰 AI Stock Options Predictor 💰")
+symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
-for headline in headlines:
-    title = headline.text.strip()
-    sentiment = TextBlob(title).sentiment.polarity
-    sentiment_label = "Positive" if sentiment > 0 else "Negative" if sentiment < 0 else "Neutral"
-    st.write(f"- **{title}** ({sentiment_label})")
+if symbol:
+    stock_data = fetch_stock_data(symbol)
+    sentiment_score = fetch_sentiment(symbol)
+    model, accuracy, X_test, y_test = train_model(stock_data)
 
-# 📌 Unique Features Explanation
-st.subheader("🚀 What Sets This Model Apart?")
+    option, strike_price, expiration, latest_data, analysis = generate_recommendation(stock_data, sentiment_score, model, symbol)
 
-st.markdown("""
-- **AI-Driven Prediction**: Machine learning-powered forecasts using optimized Random Forest.
-- **Technical Indicators Integration**: RSI, MACD, OBV, SMAs, and ATR for deep trend analysis.
-- **Real-Time Sentiment Analysis**: Analyzes news sentiment to refine predictions.
-- **Options Strategy**: Recommends precise strike prices & expiration dates dynamically.
-- **User-Friendly Interface**: Data visualization with candlestick charts and downloadable datasets.
-""")
+    st.subheader(f"📈 Option Recommendation for {symbol}")
+    st.write(f"**Recommended Option:** {option}")
+    st.write(f"**Strike Price:** ${strike_price}")
+    st.write(f"**Expiration Date:** {expiration}")
+    st.write(f"**AI Analysis:** {analysis}")
 
-st.success("✅ Analysis Complete! Stay ahead of the market.")
+    st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+
+    # Explanation of Indicators
+    st.subheader('📊 Technical Indicators Explained')
+    st.write("""
+    - **RSI (Relative Strength Index):** Measures overbought/oversold conditions (Above 70 = overbought, Below 30 = oversold).
+    - **MACD (Moving Average Convergence Divergence):** Shows momentum direction; positive = uptrend, negative = downtrend.
+    - **ATR (Average True Range):** Measures volatility; higher values indicate larger price swings.
+    - **OBV (On-Balance Volume):** Tracks volume flow to predict price movement.
+    - **SMA-20 & SMA-50 (Simple Moving Averages):** Help identify trends; when SMA-20 crosses above SMA-50, it's a bullish signal.
+    """)
+
+    # Downloadable Data
+    csv = stock_data.to_csv(index=True)
+    st.download_button("Download Stock Data", data=csv, file_name=f"{symbol}_stock_data.csv", mime="text/csv")
+
+    # Visualizations
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI', 'MACD'))
+    fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
+                                 low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'), row=3, col=1)
+    st.plotly_chart(fig)
