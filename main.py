@@ -52,6 +52,13 @@ def fetch_real_time_price(symbol):
     real_time_data = stock.history(period="1d", interval="1m")
     return real_time_data['Close'][-1]
 
+# Fetch stock fundamentals (EPS)
+def fetch_fundamentals(symbol):
+    stock = yf.Ticker(symbol)
+    financials = stock.financials
+    eps = financials.loc['Earnings Per Share'][0]  # Get the EPS value
+    return eps
+
 # Sentiment analysis from news
 def fetch_sentiment(symbol):
     articles = newsapi.get_everything(q=symbol, language="en", sort_by="publishedAt", page_size=5)
@@ -132,7 +139,7 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
     stock_data = fetch_stock_data(symbol)
-    eps = fetch_fundamentals(symbol)[0]  # Fetch EPS
+    eps = fetch_fundamentals(symbol)  # Fetch EPS
     sentiment_score = fetch_sentiment(symbol)  # Fetch Sentiment
 
     # Train or update model
