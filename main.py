@@ -2,7 +2,6 @@ import yfinance as yf
 import streamlit as st
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
-from ta.volume import OnBalanceVolume
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
@@ -65,10 +64,30 @@ def fetch_stock_data(symbol):
     data['Volatility'] = data['Close'].pct_change().rolling(10).std()
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
-    data['OBV'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
+    
+    # Try importing OnBalanceVolume, otherwise use custom implementation
+    try:
+        from ta.volume import OnBalanceVolume
+        data['OBV'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
+    except ImportError:
+        st.write("OnBalanceVolume import failed. Using custom implementation.")
+        data = calculate_obv(data)  # Use the custom OBV implementation
     
     # Handle NaN values
     data.dropna(inplace=True)
+    return data
+
+# Custom OBV calculation (manual)
+def calculate_obv(data):
+    obv = [0]  # Start with the first value as zero
+    for i in range(1, len(data)):
+        if data['Close'][i] > data['Close'][i - 1]:
+            obv.append(obv[-1] + data['Volume'][i])  # Price went up, add volume
+        elif data['Close'][i] < data['Close'][i - 1]:
+            obv.append(obv[-1] - data['Volume'][i])  # Price went down, subtract volume
+        else:
+            obv.append(obv[-1])  # No price change, carry forward the previous OBV
+    data['OBV'] = obv
     return data
 
 # Function to fetch sentiment score
@@ -152,18 +171,9 @@ if symbol:
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
 
-    # Plotting Data for Visualization
-    fig = make_subplots(rows=2, cols=2, subplot_titles=("RSI", "MACD", "Volume", "Close Price"))
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], name="RSI"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], name="MACD"), row=1, col=2)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Volume'], name="Volume"), row=2, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], name="Close Price"), row=2, col=2)
-    fig.update_layout(title="Stock Data with Indicators", height=800)
-    
-    # Downloading the data as CSV
-    st.download_button("Download Stock Data as CSV", data=stock_data.to_csv().encode(), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
-
-    st.plotly_chart(fig)
+    # Downloadable data
+    csv = stock_data.to_csv(index=True)
+    st.download_button(label="Download Stock Data", data=csv, file_name=f"{symbol}_data.csv", mime="text/csv")
 
 # Footer
 st.markdown("""
