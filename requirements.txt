@@ -1,7 +1,7 @@
-streamlit
 yfinance
+streamlit
 ta
-vaderSentiment
+textblob
 newsapi-python
 scikit-learn
-pandas
+numpy
