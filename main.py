@@ -4,17 +4,14 @@ import pandas as pd
 import numpy as np
 import datetime
 import os
-import io
-from textblob import TextBlob
-from newsapi import NewsApiClient
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.preprocessing import StandardScaler
+import joblib
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import requests
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+import matplotlib.pyplot as plt
 
-# Set API Key
+# Set API Key (ensure to keep this secure)
 API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
 
 # Custom On-Balance Volume (OBV) function
@@ -29,6 +26,17 @@ def custom_on_balance_volume(df):
             obv.append(obv[-1])
     df['OBV'] = obv
     return df
+
+# Save the trained model
+def save_model(model, filename="stock_model.pkl"):
+    joblib.dump(model, filename)
+
+# Load the trained model
+def load_model(filename="stock_model.pkl"):
+    if os.path.exists(filename):
+        return joblib.load(filename)
+    else:
+        return None
 
 # Fetch stock data
 @st.cache_data
@@ -56,12 +64,13 @@ def fetch_fundamentals(symbol):
     earnings = stock.quarterly_earnings
     return eps, earnings
 
-# Train Machine Learning Model
-@st.cache_resource
-def train_model(data, eps):
+# Train or update the model
+def train_or_update_model(data, eps, model=None):
+    # Prepare the new data for training
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
+    
     if eps:
         data['EPS'] = eps  # Add EPS as a constant column
         features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50', 'EPS']]
@@ -69,10 +78,19 @@ def train_model(data, eps):
     labels = data['Target']
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
-    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
-    model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
-    model.fit(X_train, y_train)
-    return model, model.score(X_test, y_test) * 100
+
+    # If no model exists, initialize a new model
+    if model is None:
+        model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
+        model.fit(features_scaled, labels)
+    else:
+        # Append new data to the existing features and labels (Random Forest will retrain with all data)
+        model.fit(features_scaled, labels)  # For RandomForest, it will retrain with all data each time
+
+    save_model(model)  # Save the updated model
+
+    accuracy = model.score(features_scaled, labels) * 100
+    return model, accuracy
 
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰")
@@ -81,7 +99,11 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
     stock_data = fetch_stock_data(symbol)
     eps, earnings = fetch_fundamentals(symbol)
-    model, accuracy = train_model(stock_data, eps)
+    
+    # Load the existing model and update it
+    model = load_model()
+    model, accuracy = train_or_update_model(stock_data, eps, model)
+    
     real_time_price = fetch_real_time_price(symbol)
 
     st.subheader(f"📈 Stock Data for {symbol}")
@@ -106,3 +128,22 @@ if symbol:
         st.dataframe(earnings)
     else:
         st.write("No earnings report available.")
+
+    # Plot Accuracy Over Time (if model has been updated multiple times)
+    if os.path.exists("model_accuracy.txt"):
+        accuracy_data = []
+        with open("model_accuracy.txt", "r") as f:
+            for line in f:
+                date, accuracy = line.split(": ")
+                accuracy = float(accuracy.strip().replace("%", ""))
+                accuracy_data.append((date, accuracy))
+
+        accuracy_df = pd.DataFrame(accuracy_data, columns=["Date", "Accuracy"])
+        accuracy_df['Date'] = pd.to_datetime(accuracy_df['Date'])
+
+        fig, ax = plt.subplots()
+        ax.plot(accuracy_df['Date'], accuracy_df['Accuracy'], marker='o', linestyle='-', color='b')
+        ax.set_title("Model Accuracy Over Time")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Accuracy (%)")
+        st.pyplot(fig)
