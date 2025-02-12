@@ -150,4 +150,31 @@ if symbol:
 
     st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
     test_accuracy = model.score(X_test, y_test) * 100
-    st.write(f"
+    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+
+    # Show charts for stock data and technical indicators
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
+
+    # Price chart
+    fig.add_trace(go.Candlestick(x=stock_data.index,
+                                open=stock_data['Open'], high=stock_data['High'],
+                                low=stock_data['Low'], close=stock_data['Close'], name='Candlesticks'),
+                  row=1, col=1)
+
+    # Indicators chart
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='SMA 20'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='SMA 50'), row=2, col=1)
+    
+    st.plotly_chart(fig)
+
+    # Option to download stock data as CSV
+    st.download_button(label="Download Stock Data as CSV", data=stock_data.to_csv().encode('utf-8'), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
+
+# Footer
+st.markdown("""
+    <div class="footer">
+        Created by **Shriyan Kandula** | 💻 Stock Predictions & Insights
+    </div>
+""", unsafe_allow_html=True)
