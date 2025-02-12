@@ -10,7 +10,6 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import time
 
 # Set API Key
 API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
@@ -29,7 +28,6 @@ def custom_on_balance_volume(df):
     return df
 
 # Fetch stock data
-@st.cache_data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="90d")
@@ -62,7 +60,6 @@ def fetch_real_time_price(symbol):
         return None
 
 # Fetch sentiment score from news articles
-@st.cache_data
 def fetch_sentiment(symbol):
     try:
         newsapi = NewsApiClient(api_key=API_KEY)
@@ -75,7 +72,6 @@ def fetch_sentiment(symbol):
         return 0
 
 # Train Machine Learning Model
-@st.cache_resource
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
@@ -84,9 +80,12 @@ def train_model(data):
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
     X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    
+    # Hyperparameter tuning with GridSearchCV
+    model = RandomForestClassifier(random_state=42)
     grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
     grid_search.fit(X_train, y_train)
+    
     best_model = grid_search.best_estimator_
     return best_model, grid_search.best_score_ * 100, X_test, y_test
 
@@ -104,26 +103,11 @@ def generate_recommendation(data, sentiment_score, model, symbol):
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
     return option, strike_price, expiration_date, latest_data
 
-# Function to periodically retrain the model
-def retrain_model(symbol):
-    # Fetch new stock data
-    stock_data = fetch_stock_data(symbol)
-    sentiment_score = fetch_sentiment(symbol)
-    
-    # Retrain model
-    model, accuracy, X_test, y_test = train_model(stock_data)
-    
-    # Generate new recommendation
-    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
-    
-    return option, strike_price, expiration, latest_data, model, accuracy
-
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
-    # Fetch and display data
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
     
@@ -134,7 +118,6 @@ if symbol:
     # Fetch and display the real-time stock price, including after-market
     real_time_price = fetch_real_time_price(symbol)
 
-    # Display the results
     st.subheader(f"📈 Option Recommendation for {symbol}")
     st.write(f"**Recommended Option:** {option}")
     st.write(f"**Strike Price:** ${strike_price}")
@@ -157,10 +140,3 @@ if symbol:
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
     st.plotly_chart(fig)
-
-    # Simulate retraining after every 24 hours
-    retrain_interval = 86400  # 24 hours in seconds
-    while True:
-        time.sleep(retrain_interval)  # Sleep for the given interval
-        option, strike_price, expiration, latest_data, model, accuracy = retrain_model(symbol)
-        st.write(f"### Retrained Model: Recommended Option is {option}")
