@@ -64,6 +64,18 @@ def fetch_fundamentals(symbol):
     earnings = stock.quarterly_earnings
     return eps, earnings
 
+# Save accuracy to a text file
+def save_accuracy_to_txt(accuracy):
+    date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("model_accuracy.txt", "a") as f:
+        f.write(f"{date}: {accuracy:.2f}%\n")
+
+# Store prediction details to a text file (including options)
+def save_prediction_to_txt(symbol, prediction, options_features, accuracy):
+    date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("predictions.txt", "a") as f:
+        f.write(f"{date}, {symbol}, Prediction: {prediction}, Options Features: {options_features}, Accuracy: {accuracy:.2f}%\n")
+
 # Train or update the model
 def train_or_update_model(data, eps, model=None):
     # Prepare the new data for training
@@ -114,6 +126,11 @@ if symbol:
         st.write("### EPS: Not available")
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
 
+    # Save prediction details and options features (you can customize the options)
+    options_features = {"Strike Price": 150, "Expiration Date": "2025-02-20"}  # Dummy example, you can add your logic
+    prediction = "Buy Call"  # Placeholder: Predict call/put based on model output
+    save_prediction_to_txt(symbol, prediction, options_features, accuracy)
+
     # Charts
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("Stock Price", "RSI", "OBV"))
     fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
@@ -147,3 +164,16 @@ if symbol:
         ax.set_xlabel("Date")
         ax.set_ylabel("Accuracy (%)")
         st.pyplot(fig)
+
+    # Plot past predictions and corresponding options
+    if os.path.exists("predictions.txt"):
+        predictions_data = []
+        with open("predictions.txt", "r") as f:
+            for line in f:
+                date, symbol, prediction, options, accuracy = line.split(", ")
+                predictions_data.append((date, symbol, prediction, options, accuracy))
+
+        predictions_df = pd.DataFrame(predictions_data, columns=["Date", "Symbol", "Prediction", "Options Features", "Accuracy"])
+        predictions_df['Date'] = pd.to_datetime(predictions_df['Date'])
+        st.write("### Past Predictions")
+        st.dataframe(predictions_df)
