@@ -79,14 +79,23 @@ def generate_recommendation(data, sentiment_score, model):
 
     return option, strike_price, expiration_date
 
-# Streamlit UI
+# Streamlit UI with enhanced layout
+st.set_page_config(page_title="AI Stock Options Predictor", layout="wide")
+
+# Sidebar: Inputs and Options
+st.sidebar.title("🔍 Stock Options Prediction")
+symbol = st.sidebar.text_input("Enter Stock Symbol", "AAPL")
+if symbol:
+    st.sidebar.markdown("### Stock Analysis Options")
+    show_chart = st.sidebar.checkbox("Show Stock Chart", value=True)
+
+# Display Main Title and Image
 st.title("💰 AI Stock Options Predictor 💰")
 st.image("https://media.istockphoto.com/id/184276818/photo/us-dollars-stack.webp?b=1&s=170667a&w=0&k=20&c=FgRD0szcZ1Z-vpMZtkmMl5m1lmjVxQ2FYr5FUzDfJmM=", 
          caption="Let's Make Some Money!", use_container_width=True)
 
-symbol = st.text_input("Enter Stock Symbol", "AAPL")
-
 if symbol:
+    # Fetch data and process
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
     model, accuracy, X_test, y_test = train_model(stock_data)
@@ -94,36 +103,42 @@ if symbol:
     # Generate recommendation
     option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
 
-    st.write(f"### Option Recommendation: **{option}**")
-    st.write(f"Strike Price: **${strike_price}**")
-    st.write(f"Expiration Date: **{expiration}**")
+    # Create Columns for displaying results
+    col1, col2 = st.columns(2)
 
-    # Display Model Accuracy
-    st.markdown(f"### 🔥 Model Accuracy (Cross-Validation): **{accuracy:.2f}%**")
-
-    # Test accuracy on unseen data
-    test_accuracy = model.score(X_test, y_test) * 100
-    st.write(f"### Model Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-
-    # Plot stock data
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=stock_data.index,
-                                 open=stock_data['Open'],
-                                 high=stock_data['High'],
-                                 low=stock_data['Low'],
-                                 close=stock_data['Close'],
-                                 name='Market Data'))
-    fig.update_layout(title=f"{symbol} Stock Price Chart",
-                      xaxis_title='Date',
-                      yaxis_title='Stock Price',
-                      xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig, use_container_width=True)
+    # Display Option Recommendation in columns
+    with col1:
+        st.write(f"### Option Recommendation: **{option}**")
+        st.write(f"Strike Price: **${strike_price}**")
+        st.write(f"Expiration Date: **{expiration}**")
+    
+    # Display Accuracy and Test Results in columns
+    with col2:
+        st.markdown(f"### 🔥 Model Accuracy (Cross-Validation): **{accuracy:.2f}%**")
+        test_accuracy = model.score(X_test, y_test) * 100
+        st.write(f"### Model Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+    
+    # Display Stock Chart if checkbox is selected
+    if show_chart:
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(x=stock_data.index,
+                                     open=stock_data['Open'],
+                                     high=stock_data['High'],
+                                     low=stock_data['Low'],
+                                     close=stock_data['Close'],
+                                     name='Market Data'))
+        fig.update_layout(title=f"{symbol} Stock Price Chart",
+                          xaxis_title='Date',
+                          yaxis_title='Stock Price',
+                          xaxis_rangeslider_visible=False)
+        st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("""
     **Disclaimer:** This application is for informational purposes only and does not constitute financial advice.
     Please conduct your own due diligence before making any investment decisions.
     """)
 
-# Footer
+# Footer with contact information
 st.markdown("---")
 st.markdown("### Created by **Shriyan K**")
+st.markdown("For inquiries or feedback, contact: **shriyan.k@example.com**")
