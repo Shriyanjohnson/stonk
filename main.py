@@ -8,10 +8,12 @@ import io
 from textblob import TextBlob
 from newsapi import NewsApiClient
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import requests
+import beautifulsoup4
 
 # Set API Key
 API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
@@ -29,7 +31,7 @@ st.markdown("""
         color: #1f77b4;
     }
     </style>
-""", unsafe_allow_html=True)  # ✅ Ensure this is properly closed!
+""", unsafe_allow_html=True)
 
 # Custom On-Balance Volume (OBV) function
 def custom_on_balance_volume(df):
@@ -120,4 +122,3 @@ if symbol:
         st.dataframe(earnings)
     else:
         st.write("No earnings report available.")
-
