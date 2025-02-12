@@ -157,6 +157,10 @@ if symbol:
     # Show the chart
     st.plotly_chart(fig, use_container_width=True)
 
+    # Show numerical values of indicators over time
+    st.subheader(f"### Indicator Values for {symbol} Over Time")
+    st.dataframe(stock_data[['Close', 'RSI', 'MACD', 'SMA_20', 'SMA_50']])
+
     # Add download button for the data
     csv = stock_data.to_csv(index=True)  # Convert data to CSV format
     st.download_button(
