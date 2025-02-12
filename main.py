@@ -13,22 +13,22 @@ import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# Custom HTML and CSS styling with neon green background
+# Custom HTML and CSS styling with blue background
 st.markdown("""
     <style>
         body {
-            background-color: #39FF14; /* Neon green background */
+            background-color: #3498db; /* Blue background */
             font-family: 'Arial', sans-serif;
         }
         .title {
             text-align: center;
-            color: #2c3e50;
+            color: #ecf0f1;
             font-size: 36px;
             font-weight: bold;
             margin-top: 20px;
         }
         .header {
-            color: #2c3e50;
+            color: #ecf0f1;
             font-size: 28px;
             margin-bottom: 10px;
         }
@@ -74,7 +74,7 @@ st.markdown("""
             font-size: 16px;
         }
         .download-btn {
-            background-color: #3498db;
+            background-color: #2980b9;
             color: white;
             padding: 12px 20px;
             border-radius: 5px;
@@ -82,7 +82,7 @@ st.markdown("""
             font-size: 16px;
         }
         .download-btn:hover {
-            background-color: #2980b9;
+            background-color: #1f618d;
         }
         .disclaimer {
             font-size: 14px;
@@ -247,7 +247,7 @@ if symbol:
         line=dict(color='purple')
     ), row=3, col=1)
 
-    # Update layout
+    # Update layout for the plot
     fig.update_layout(
         title=f"{symbol} Stock Data with Indicators",
         xaxis_title="Date",
@@ -260,9 +260,17 @@ if symbol:
     # Option to download data
     csv = stock_data.to_csv(index=True)
     st.download_button(label="Download Stock Data (CSV)", data=csv, file_name=f"{symbol}_stock_data.csv", mime="text/csv")
-    
+
+    # Disclaimer
     st.markdown(f"""
         <div class="disclaimer">
             Disclaimer: This app is for educational purposes only and should not be considered as financial advice.
         </div>
     """, unsafe_allow_html=True)
+
+# Footer
+st.markdown("""
+    <div class="footer">
+        Created by **Shriyan K** | 💻 Stock Predictions & Insights
+    </div>
+""", unsafe_allow_html=True)
