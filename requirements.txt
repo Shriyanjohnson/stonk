@@ -4,11 +4,10 @@ yfinance
 scikit-learn
 pandas
 plotly
+joblib
+matplotlib
+streamlit
 textblob
 beautifulsoup4
 requests
-streamlit
 newsapi-python
-joblib
-matplotlib
-
