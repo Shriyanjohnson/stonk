@@ -13,7 +13,6 @@ from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import requests
-import beautifulsoup4
 
 # Set API Key
 API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
