@@ -1,12 +1,10 @@
 import yfinance as yf
-import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from ta.momentum import RSIIndicator, StochasticOscillator
 from ta.trend import MACD, EMAIndicator
 from ta.volatility import BollingerBands, AverageTrueRange
-from ta.volume import OnBalanceVolume
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.metrics import accuracy_score
@@ -40,10 +38,28 @@ def fetch_stock_data(symbol, lookback):
     data['Bollinger_Low'] = BollingerBands(data['Close']).bollinger_lband()
     data['ATR'] = AverageTrueRange(data['High'], data['Low'], data['Close']).average_true_range()
     data['Stochastic'] = StochasticOscillator(data['High'], data['Low'], data['Close']).stoch()
-    data['OBV'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
 
+    # Custom OBV calculation (if ta.volume doesn't work)
+    data = on_balance_volume(data)
+    
     data.dropna(inplace=True)
     return data
+
+# Custom OBV Function
+def on_balance_volume(df):
+    """
+    Calculate the On-Balance Volume (OBV) for a given DataFrame with stock data.
+    """
+    obv = [0]  # Initialize OBV list with 0
+    for i in range(1, len(df)):
+        if df['Close'][i] > df['Close'][i-1]:
+            obv.append(obv[-1] + df['Volume'][i])  # Volume added to OBV if the close price is higher
+        elif df['Close'][i] < df['Close'][i-1]:
+            obv.append(obv[-1] - df['Volume'][i])  # Volume subtracted from OBV if the close price is lower
+        else:
+            obv.append(obv[-1])  # No change if the close price is the same
+    df['OBV'] = obv
+    return df
 
 # Fetch the data
 data = fetch_stock_data(symbol, lookback)
@@ -156,3 +172,4 @@ st.write("""
 --- 
 Created by: **Shriyan Kandula**, a Sophomore at Shaker High School. This stock prediction model uses machine learning and technical analysis to provide insights into market trends.
 """)
+
