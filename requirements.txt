@@ -5,3 +5,4 @@ textblob
 newsapi-python
 scikit-learn
 numpy
+plotly
