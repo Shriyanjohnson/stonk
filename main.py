@@ -16,7 +16,7 @@ from plotly.subplots import make_subplots
 # Function to fetch stock data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
-    data = stock.history(period="90d")  # Last 90 days for better analysis
+    data = stock.history(period="max")  # Fetch all available historical data
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
     data['Volatility'] = data['Close'].pct_change().rolling(10).std()  # 10-day rolling volatility
