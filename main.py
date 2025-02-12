@@ -1,58 +1,29 @@
 import yfinance as yf
 import streamlit as st
+import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
-from ta.volume import OnBalanceVolume
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
-import pandas as pd
-import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
 
-# Custom HTML & CSS Styling
-st.markdown("""
-    <style>
-        .title {
-            text-align: center;
-            color: #ecf0f1;
-            font-size: 36px;
-            font-weight: bold;
-            margin-top: 20px;
-        }
-        .subtitle {
-            text-align: center;
-            color: #bdc3c7;
-            font-size: 18px;
-            margin-bottom: 20px;
-        }
-        .current-price, .recommendation {
-            padding: 20px;
-            background-color: #ecf0f1;
-            border-radius: 8px;
-            margin-top: 30px;
-            text-align: center;
-            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
-            font-size: 24px;
-            color: #2c3e50;
-        }
-        .recommendation h3 {
-            color: #e74c3c;
-            font-size: 22px;
-        }
-        .footer {
-            text-align: center;
-            color: #7f8c8d;
-            margin-top: 50px;
-            font-size: 16px;
-        }
-    </style>
-""", unsafe_allow_html=True)
+# Custom OBV Implementation
+def calculate_obv(data):
+    obv = [0]
+    for i in range(1, len(data)):
+        if data['Close'][i] > data['Close'][i - 1]:
+            obv.append(obv[-1] + data['Volume'][i])
+        elif data['Close'][i] < data['Close'][i - 1]:
+            obv.append(obv[-1] - data['Volume'][i])
+        else:
+            obv.append(obv[-1])
+    return pd.Series(obv, index=data.index, name='OBV')
 
 # Function to fetch stock data
 def fetch_stock_data(symbol):
@@ -62,7 +33,7 @@ def fetch_stock_data(symbol):
     # Technical Indicators
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
-    data['OBV'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
+    data['OBV'] = calculate_obv(data)  # Using custom OBV function
     data['Volatility'] = data['Close'].pct_change().rolling(10).std()
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
@@ -71,12 +42,10 @@ def fetch_stock_data(symbol):
     data.dropna(inplace=True)
     return data
 
-# Function to fetch sentiment score
+# Fetch sentiment score from news
 def fetch_sentiment(symbol):
     try:
         api_key = os.getenv("NEWSAPI_KEY")
-        if not api_key:
-            return 0
         newsapi = NewsApiClient(api_key=api_key)
         articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
         if not articles:
@@ -86,7 +55,7 @@ def fetch_sentiment(symbol):
     except:
         return 0
 
-# Train Model with Cross-Validation
+# Training model with Random Forest Classifier
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
@@ -124,9 +93,7 @@ def generate_recommendation(data, sentiment_score, model):
     return option, strike_price, expiration_date
 
 # Streamlit UI
-st.markdown('<div class="title">💰 AI Stock Options Predictor 💰</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Developed by Shriyan Kandula, a sophomore at Shaker High School.</div>', unsafe_allow_html=True)
-
+st.title("💰 AI Stock Options Predictor 💰")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
@@ -135,36 +102,47 @@ if symbol:
     model, accuracy, X_test, y_test = train_model(stock_data)
 
     current_price = stock_data['Close'].iloc[-1]
-    st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
+    st.write(f"Current Price of {symbol}: **${current_price:.2f}**")
 
-    # Displaying technical indicators
-    st.write(f"### Technical Indicators for {symbol}")
-    st.write(f"**RSI**: {stock_data['RSI'].iloc[-1]:.2f}")
-    st.write(f"**MACD**: {stock_data['MACD'].iloc[-1]:.2f}")
-    st.write(f"**On-Balance Volume (OBV)**: {stock_data['OBV'].iloc[-1]:.2f}")
-    st.write(f"**Volatility (10-day rolling)**: {stock_data['Volatility'].iloc[-1]:.2f}")
-    st.write(f"**SMA 20**: {stock_data['SMA_20'].iloc[-1]:.2f}")
-    st.write(f"**SMA 50**: {stock_data['SMA_50'].iloc[-1]:.2f}")
+    # Displaying technical indicators with explanations
+    st.write(f"**RSI (Relative Strength Index)**: {stock_data['RSI'].iloc[-1]:.2f}")
+    st.write("RSI measures the magnitude of recent price changes to evaluate overbought or oversold conditions. An RSI above 70 indicates overbought, below 30 indicates oversold.")
+
+    st.write(f"**MACD (Moving Average Convergence Divergence)**: {stock_data['MACD'].iloc[-1]:.2f}")
+    st.write("MACD is used to spot changes in the strength, direction, momentum, and duration of a trend. A positive MACD indicates upward momentum, and a negative MACD indicates downward momentum.")
+
+    st.write(f"**OBV (On-Balance Volume)**: {stock_data['OBV'].iloc[-1]:.2f}")
+    st.write("OBV uses volume flow to predict changes in stock price. An increasing OBV indicates buying pressure, while a decreasing OBV indicates selling pressure.")
+
+    st.write(f"**Volatility**: {stock_data['Volatility'].iloc[-1]:.2f}")
+    st.write("Volatility is the statistical measure of the dispersion of returns. High volatility often indicates a potential for larger price swings, while low volatility indicates a steadier price.")
+
+    st.write(f"**SMA 20 (20-day Simple Moving Average)**: {stock_data['SMA_20'].iloc[-1]:.2f}")
+    st.write("The 20-day SMA is used to smooth out short-term fluctuations and identify trends over the past month. A rising SMA 20 indicates an uptrend, while a falling SMA indicates a downtrend.")
+
+    st.write(f"**SMA 50 (50-day Simple Moving Average)**: {stock_data['SMA_50'].iloc[-1]:.2f}")
+    st.write("The 50-day SMA is a medium-term trend indicator. It helps identify the general direction of a stock price over the past 2 months.")
 
     # Option Recommendation
     option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
-    st.markdown(f"""
-        <div class="recommendation">
-            <h3>Option Recommendation: **{option}**</h3>
-            <p>Strike Price: **${strike_price}**</p>
-            <p>Expiration Date: **{expiration}**</p>
-        </div>
-    """, unsafe_allow_html=True)
+    st.write(f"Option Recommendation: **{option}**")
+    st.write(f"Strike Price: **${strike_price}**")
+    st.write(f"Expiration Date: **{expiration}**")
 
     # Display model accuracy
-    st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-    test_accuracy = model.score(X_test, y_test) * 100
-    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+    st.write(f"Model Accuracy: **{accuracy:.2f}%**")
+    st.write("The model's accuracy is derived from the training data and cross-validation process. It measures the percentage of correct predictions based on historical data.")
 
-# Footer
-st.markdown("""
-    <div class="footer">
-        Created by **Shriyan Kandula** | 💻 Stock Predictions & Insights
-    </div>
-""", unsafe_allow_html=True)
+    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+    st.write("The test accuracy represents the model's performance on data it hasn't seen before, which gives an indication of how well it might perform in real-world situations.")
+
+    # Adding download link for data (CSV)
+    csv_data = stock_data.to_csv()
+    st.download_button("Download Stock Data", csv_data, file_name=f"{symbol}_stock_data.csv", mime="text/csv")
+
+    # Footer with your name and school
+    st.markdown("<br><br><hr>", unsafe_allow_html=True)
+    st.markdown("Created by: Shriyan Kandula, a sophomore at Shaker High School", unsafe_allow_html=True)
+
 
