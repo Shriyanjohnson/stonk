@@ -13,11 +13,11 @@ import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# Custom HTML and CSS styling
+# Custom HTML and CSS styling with neon green background
 st.markdown("""
     <style>
         body {
-            background-color: #f5f5f5;
+            background-color: #39FF14; /* Neon green background */
             font-family: 'Arial', sans-serif;
         }
         .title {
@@ -44,6 +44,16 @@ st.markdown("""
             border-radius: 5px;
             border: 1px solid #ccc;
             background-color: #fff;
+        }
+        .current-price {
+            padding: 20px;
+            background-color: #ecf0f1;
+            border-radius: 8px;
+            margin-top: 30px;
+            text-align: center;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+            font-size: 24px;
+            color: #2c3e50;
         }
         .recommendation {
             padding: 20px;
@@ -157,6 +167,16 @@ if symbol:
     sentiment_score = fetch_sentiment(symbol)
     model, accuracy, X_test, y_test = train_model(stock_data)  # Train model
 
+    # Fetch the current price
+    current_price = stock_data['Close'].iloc[-1]
+
+    # Display Current Price
+    st.markdown(f"""
+        <div class="current-price">
+            Current Price of {symbol}: **${current_price:.2f}**
+        </div>
+    """, unsafe_allow_html=True)
+
     # Generate option recommendation
     option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
 
@@ -206,7 +226,7 @@ if symbol:
         y=stock_data['SMA_50'],
         mode='lines',
         name='SMA 50',
-        line=dict(color='green')
+        line=dict(color='blue')
     ), row=1, col=1)
 
     # Add RSI trace
@@ -215,7 +235,7 @@ if symbol:
         y=stock_data['RSI'],
         mode='lines',
         name='RSI',
-        line=dict(color='purple')
+        line=dict(color='orange')
     ), row=2, col=1)
 
     # Add MACD trace
@@ -224,34 +244,25 @@ if symbol:
         y=stock_data['MACD'],
         mode='lines',
         name='MACD',
-        line=dict(color='blue')
+        line=dict(color='purple')
     ), row=3, col=1)
 
     # Update layout
     fig.update_layout(
-        title=f"{symbol} Stock Analysis",
-        xaxis_title='Date',
-        yaxis_title='Stock Price',
-        xaxis_rangeslider_visible=False
+        title=f"{symbol} Stock Data with Indicators",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        template="plotly_dark"
     )
-    fig.update_yaxes(range=[0, 100], row=2, col=1)  # RSI range
-    fig.update_yaxes(range=[stock_data['MACD'].min() - 1, stock_data['MACD'].max() + 1], row=3, col=1)  # MACD range
 
-    # Show the chart
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig)
 
-    # Add download button for the data
-    csv = stock_data.to_csv(index=True)  # Convert data to CSV format
+    # Option to download data
+    csv = stock_data.to_csv(index=True)
+    st.download_button(label="Download Stock Data (CSV)", data=csv, file_name=f"{symbol}_stock_data.csv", mime="text/csv")
+    
     st.markdown(f"""
-        <button class="download-btn" onclick="window.location.href='data:text/csv;charset=utf-8,{csv}'">
-            Download Stock Data
-        </button>
+        <div class="disclaimer">
+            Disclaimer: This app is for educational purposes only and should not be considered as financial advice.
+        </div>
     """, unsafe_allow_html=True)
-
-# Disclaimer
-st.markdown(""" 
-    <div class="disclaimer">**Disclaimer:** This application is for informational purposes only and does not constitute financial advice. Please conduct your own due diligence before making any investment decisions.</div>
-""", unsafe_allow_html=True)
-
-# Footer
-st.markdown('<div class="footer">Created by **Shriyan K**</div>', unsafe_allow_html=True)
