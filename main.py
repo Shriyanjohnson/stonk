@@ -58,7 +58,8 @@ def fetch_sentiment(symbol):
             return 0
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
-    except:
+    except Exception as e:
+        st.error(f"Error fetching sentiment: {e}")
         return 0
 
 # Train Machine Learning Model
