@@ -42,6 +42,12 @@ def fetch_stock_data(symbol):
     data.dropna(inplace=True)
     return data
 
+# Fetch real-time stock price
+def fetch_real_time_price(symbol):
+    stock = yf.Ticker(symbol)
+    real_time_data = stock.history(period="1d", interval="1m")
+    return real_time_data['Close'][-1]  # Latest closing price
+
 # Fetch sentiment score from news articles
 @st.cache_data
 def fetch_sentiment(symbol):
@@ -88,11 +94,16 @@ def generate_recommendation(data, sentiment_score, model, symbol):
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
+
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
     model, accuracy, X_test, y_test = train_model(stock_data)
     option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
+
+    # Fetch and display the real-time stock price
+    real_time_price = fetch_real_time_price(symbol)
+
     st.subheader(f"📈 Option Recommendation for {symbol}")
     st.write(f"**Recommended Option:** {option}")
     st.write(f"**Strike Price:** ${strike_price}")
@@ -100,7 +111,10 @@ if symbol:
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+    st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
+    
     st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
+
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
     fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
