@@ -8,10 +8,11 @@ from newsapi import NewsApiClient
 import datetime
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
+import os
 
 # Custom OBV Implementation
 def calculate_obv(data):
@@ -30,7 +31,7 @@ def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="90d")
     
-    # Technical Indicators
+    # Adding Technical Indicators
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
     data['OBV'] = calculate_obv(data)  # Using custom OBV function
@@ -38,7 +39,7 @@ def fetch_stock_data(symbol):
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
     
-    # Handle NaN values
+    # Drop rows with NaN values
     data.dropna(inplace=True)
     return data
 
@@ -52,10 +53,10 @@ def fetch_sentiment(symbol):
             return 0
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
-    except:
+    except Exception as e:
         return 0
 
-# Training model with Random Forest Classifier
+# Train model with hyperparameter tuning
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
@@ -69,10 +70,19 @@ def train_model(data):
     X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
     
     model = RandomForestClassifier(n_estimators=100, random_state=42)
-    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    param_grid = {
+        'max_depth': [10, 20, 30],
+        'min_samples_split': [2, 5, 10]
+    }
     
-    model.fit(X_train, y_train)
-    return model, cv_scores.mean() * 100, X_test, y_test
+    grid_search = GridSearchCV(model, param_grid, cv=5, n_jobs=-1, verbose=2)
+    grid_search.fit(X_train, y_train)
+    model = grid_search.best_estimator_
+
+    accuracy = grid_search.best_score_ * 100
+    test_accuracy = model.score(X_test, y_test) * 100
+    
+    return model, accuracy, test_accuracy
 
 # Option Recommendation Function
 def generate_recommendation(data, sentiment_score, model):
@@ -99,7 +109,7 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
-    model, accuracy, X_test, y_test = train_model(stock_data)
+    model, training_accuracy, test_accuracy = train_model(stock_data)
 
     current_price = stock_data['Close'].iloc[-1]
     st.write(f"Current Price of {symbol}: **${current_price:.2f}**")
@@ -130,12 +140,9 @@ if symbol:
     st.write(f"Expiration Date: **{expiration}**")
 
     # Display model accuracy
-    st.write(f"Model Accuracy: **{accuracy:.2f}%**")
-    st.write("The model's accuracy is derived from the training data and cross-validation process. It measures the percentage of correct predictions based on historical data.")
-
-    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"Model Accuracy (Training): **{training_accuracy:.2f}%**")
     st.write(f"Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-    st.write("The test accuracy represents the model's performance on data it hasn't seen before, which gives an indication of how well it might perform in real-world situations.")
+    st.write("The model’s accuracy is derived from both training data (how well it performs on known data) and test data (how well it generalizes to new, unseen data).")
 
     # Adding download link for data (CSV)
     csv_data = stock_data.to_csv()
@@ -145,4 +152,4 @@ if symbol:
     st.markdown("<br><br><hr>", unsafe_allow_html=True)
     st.markdown("Created by: Shriyan Kandula, a sophomore at Shaker High School", unsafe_allow_html=True)
 
-
+ 
