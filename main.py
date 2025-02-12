@@ -55,8 +55,8 @@ def fetch_real_time_price(symbol):
 # Fetch stock fundamentals (EPS)
 def fetch_fundamentals(symbol):
     stock = yf.Ticker(symbol)
-    financials = stock.financials
-    eps = financials.loc['Earnings Per Share'][0]  # Get the EPS value
+    # Access the EPS from the info attribute
+    eps = stock.info.get('epsTrailingTwelveMonths', None)
     return eps
 
 # Sentiment analysis from news
