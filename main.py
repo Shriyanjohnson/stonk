@@ -78,6 +78,17 @@ def generate_recommendation(data, sentiment_score, model):
 
     return option, strike_price, expiration_date
 
+# Function to calculate the accuracy of the model based on the last 5 days
+def calculate_accuracy(data, model):
+    # Using the last 5 days of data for evaluation
+    last_5_days = data.tail(5)
+    last_5_days['Predicted'] = model.predict(last_5_days[['Close', 'RSI', 'MACD', 'Volatility']])
+    last_5_days['Actual Movement'] = np.where(last_5_days['Close'].shift(-1) > last_5_days['Close'], 1, 0)
+    
+    correct_predictions = (last_5_days['Predicted'] == last_5_days['Actual Movement']).sum()
+    accuracy = (correct_predictions / len(last_5_days)) * 100
+    return accuracy
+
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰")
 st.image("https://media.istockphoto.com/id/184276818/photo/us-dollars-stack.webp?b=1&s=170667a&w=0&k=20&c=FgRD0szcZ1Z-vpMZtkmMl5m1lmjVxQ2FYr5FUzDfJmM=", 
@@ -99,6 +110,9 @@ if symbol:
         # Save the trained model for future use
         joblib.dump(model, 'trained_model.pkl')
 
+    # Calculate the current accuracy based on the last 5 days of data
+    current_accuracy = calculate_accuracy(stock_data, model)
+
     option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
 
     st.write(f"### Option Recommendation: **{option}**")
@@ -106,7 +120,8 @@ if symbol:
     st.write(f"Expiration Date: **{expiration}**")
 
     # Display Model Accuracy
-    st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+    st.markdown(f"### 🔥 Model Accuracy (based on last 5 days): **{current_accuracy:.2f}%**")
+    st.markdown(f"### 🔥 Overall Model Accuracy: **{accuracy:.2f}%**")
 
     # Plot stock data using Plotly
     fig = go.Figure()
