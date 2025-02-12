@@ -5,7 +5,7 @@ import numpy as np
 import datetime
 from textblob import TextBlob
 from newsapi import NewsApiClient
-from sklearn.linear_model import SGDClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
@@ -27,17 +27,6 @@ def custom_on_balance_volume(df):
     df['OBV'] = obv
     return df
 
-# Additional Feature - MACD
-def compute_macd(df):
-    short_window = 12
-    long_window = 26
-    signal_window = 9
-    df['EMA_short'] = df['Close'].ewm(span=short_window, min_periods=1).mean()
-    df['EMA_long'] = df['Close'].ewm(span=long_window, min_periods=1).mean()
-    df['MACD'] = df['EMA_short'] - df['EMA_long']
-    df['Signal_Line'] = df['MACD'].ewm(span=signal_window, min_periods=1).mean()
-    return df
-
 # Fetch stock data
 @st.cache_data
 def fetch_stock_data(symbol):
@@ -48,8 +37,7 @@ def fetch_stock_data(symbol):
     data = custom_on_balance_volume(data)
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
-    data = compute_macd(data)
-    data.dropna(inplace=True)
+    data.dropna(inplace=True)  # Drop rows with missing values
     return data
 
 # Fetch real-time stock price
@@ -68,44 +56,42 @@ def fetch_sentiment(symbol):
             return 0
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
-    except Exception as e:
-        print(f"Error fetching sentiment: {e}")
+    except:
         return 0
 
-# Train Machine Learning Model (SGD for online learning)
+# Train Machine Learning Model
 @st.cache_resource
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
-    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50', 'MACD', 'Signal_Line']]
+    
+    # Features for training
+    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
     labels = data['Target']
     
-    # Check for missing data and handle it
-    features = features.dropna()
-    labels = labels.loc[features.index]  # Ensure labels align with features
+    # Check for missing data in features and labels
+    if features.isnull().sum().any() or labels.isnull().sum() > 0:
+        st.error("Data contains missing values. Please check the dataset.")
+        return None, None, None, None
     
-    # Standardization of the features
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
-
-    # Train/test split
     X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
 
-    # Initialize the model (SGDClassifier) with appropriate parameters
-    model = SGDClassifier(loss='log', max_iter=1000, tol=1e-3, random_state=42)
+    # Initialize and train the model
     try:
-        # Train the model
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
         model.fit(X_train, y_train)
     except Exception as e:
-        print(f"Error training model: {e}")
-        return None, None, None
+        st.error(f"Error during model training: {e}")
+        return None, None, None, None
 
     return model, X_test, y_test
 
 # Option Recommendation Function
 def generate_recommendation(data, sentiment_score, model, symbol):
     latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50'], latest_data['MACD'], latest_data['Signal_Line']]])
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
     prediction_prob = model.predict_proba(latest_features)[0][1]
     option = "Call" if prediction_prob > 0.5 else "Put"
     if sentiment_score > 0.2 and option == "Put":
@@ -123,9 +109,11 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
+    
+    # Train model and get recommendation
     model, X_test, y_test = train_model(stock_data)
     
-    if model is not None:
+    if model:
         option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
 
         # Fetch and display the real-time stock price
@@ -135,18 +123,18 @@ if symbol:
         st.write(f"**Recommended Option:** {option}")
         st.write(f"**Strike Price:** ${strike_price}")
         st.write(f"**Expiration Date:** {expiration}")
-        
-        test_accuracy = model.score(X_test, y_test) * 100
-        st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
         st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
 
+        # Model accuracy
+        test_accuracy = model.score(X_test, y_test) * 100
+        st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+
+        # Download stock data
         st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
 
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI & MACD'))
+        # Plotting stock data with Plotly
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
         fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
                                      low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
         fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
-        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'), row=2, col=1)
         st.plotly_chart(fig)
-    else:
-        st.error("Model failed to train. Please check the logs.")
