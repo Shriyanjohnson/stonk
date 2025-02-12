@@ -96,8 +96,19 @@ if symbol:
     current_price = stock_data['Close'][-1]
     st.write(f"### Current Price of {symbol}: **${current_price:.2f}**")
 
+    # Display Sentiment Score
+    st.write(f"### Sentiment Score for {symbol}: **{sentiment_score:.2f}**")
+    if sentiment_score > 0:
+        st.markdown("#### **Positive News Sentiment!** 📈")
+    elif sentiment_score < 0:
+        st.markdown("#### **Negative News Sentiment!** 📉")
+    else:
+        st.markdown("#### **Neutral News Sentiment.** 🤔")
+
     # Plotting Stock Chart (Candlestick Chart)
     fig = go.Figure()
+
+    # Candlestick chart
     fig.add_trace(go.Candlestick(x=stock_data.index,
                                  open=stock_data['Open'],
                                  high=stock_data['High'],
@@ -109,11 +120,24 @@ if symbol:
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='SMA 20', line=dict(color='red')))
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='SMA 50', line=dict(color='green')))
 
+    # Adding RSI as a subplot
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI', line=dict(color='purple')), row=2, col=1)
+
+    # Adding MACD as a subplot
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD', line=dict(color='blue')), row=3, col=1)
+
     # Update Layout
     fig.update_layout(title=f"{symbol} Stock Price Chart",
                       xaxis_title='Date',
                       yaxis_title='Stock Price',
                       xaxis_rangeslider_visible=False)
+
+    fig.update_layout(
+        xaxis2=dict(title='Date', showgrid=False),
+        yaxis2=dict(title='RSI', range=[0, 100]),
+        xaxis3=dict(title='Date', showgrid=False),
+        yaxis3=dict(title='MACD')
+    )
 
     # Show Chart
     st.plotly_chart(fig, use_container_width=True)
@@ -124,4 +148,3 @@ if symbol:
     # Footer
     st.markdown("---")
     st.markdown("### Created by **Shriyan K**")
-
