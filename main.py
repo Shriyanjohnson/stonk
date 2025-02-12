@@ -142,4 +142,3 @@ if symbol:
     st.write("**On-Balance Volume** shows how volume is related to price movement.")
     st.write("**SMA** indicates trend direction.")
     st.markdown("<br><br><div class='footer'>Made by Shriyan Kandula - Sophomore at Shaker High School.</div>", unsafe_allow_html=True)
-
