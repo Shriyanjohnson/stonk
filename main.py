@@ -1,15 +1,16 @@
 import yfinance as yf
 import streamlit as st
-import pandas as pd
-import numpy as np
-import datetime
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
 from textblob import TextBlob
 from newsapi import NewsApiClient
+import datetime
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-import plotly.graph_objects as go
+from sklearn.model_selection import train_test_split, cross_val_score
+import pandas as pd
 import os
+import plotly.graph_objects as go
 
 # Function to fetch stock data
 def fetch_stock_data(symbol):
@@ -26,8 +27,7 @@ def fetch_stock_data(symbol):
 # Function to fetch sentiment score from NewsAPI
 def fetch_sentiment(symbol):
     try:
-        # Get API key from environment variable
-        api_key = os.getenv("NEWSAPI_KEY")
+        api_key = os.getenv("newsapi_key")  # Get API key from environment variable
         newsapi = NewsApiClient(api_key=api_key)
         all_articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5)
         articles = all_articles.get('articles', [])
@@ -39,28 +39,34 @@ def fetch_sentiment(symbol):
     except Exception:
         return 0  # Default to neutral if API fails
 
-# Function to train machine learning model
+# Function to train machine learning model with cross-validation
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)  # 1 = Call, 0 = Put
 
     features = data[['Close', 'RSI', 'MACD', 'Volatility', 'SMA_20', 'SMA_50']]
     labels = data['Target']
-
+    
+    # Split the data for training/testing
+    X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.3, random_state=42)
+    
     # Initialize Random Forest model
     model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(features, labels)
     
-    accuracy = model.score(features, labels) * 100
-    return model, accuracy
+    # Use cross-validation for better generalization
+    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    accuracy = cv_scores.mean() * 100  # Cross-validation accuracy
 
-# Function to generate option recommendation
+    model.fit(X_train, y_train)
+    return model, accuracy, X_test, y_test
+
+# Function to generate option recommendation with sentiment adjustment
 def generate_recommendation(data, sentiment_score, model):
     latest_data = data.iloc[-1]
     latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50']]])
 
-    prediction = model.predict(latest_features)[0]
-    option = "Call" if prediction == 1 else "Put"
+    prediction_prob = model.predict_proba(latest_features)[0][1]  # Probability of being a 'Call'
+    option = "Call" if prediction_prob > 0.5 else "Put"
 
     # Adjust recommendation based on sentiment
     if sentiment_score > 0.2 and option == "Put":
@@ -83,7 +89,9 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
-    model, accuracy = train_model(stock_data)
+    model, accuracy, X_test, y_test = train_model(stock_data)
+    
+    # Generate recommendation
     option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
 
     st.write(f"### Option Recommendation: **{option}**")
@@ -91,7 +99,11 @@ if symbol:
     st.write(f"Expiration Date: **{expiration}**")
 
     # Display Model Accuracy
-    st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+    st.markdown(f"### 🔥 Model Accuracy (Cross-Validation): **{accuracy:.2f}%**")
+
+    # Test accuracy on unseen data
+    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"### Model Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
 
     # Plot stock data
     fig = go.Figure()
