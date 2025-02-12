@@ -13,8 +13,8 @@ from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# Set API Key
-API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
+# Set API Key directly
+API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Ensure you handle the API key securely
 
 # Custom On-Balance Volume (OBV) function
 def custom_on_balance_volume(df):
@@ -58,7 +58,8 @@ def fetch_sentiment(symbol):
             return 0
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
-    except:
+    except Exception as e:
+        st.error(f"Error fetching sentiment: {e}")
         return 0
 
 # Train Machine Learning Model
