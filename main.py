@@ -62,13 +62,48 @@ def fetch_sentiment(symbol):
     except:
         return 0
 
-# Train Model with GridSearchCV
+# Function to fetch earnings data
+@st.cache_data
+def fetch_earnings_data(symbol):
+    stock = yf.Ticker(symbol)
+    earnings_data = stock.earnings_reports
+    if earnings_data.empty:
+        return None
+    return earnings_data
+
+# Function to analyze earnings impact and generate numerical features
+def analyze_earnings_impact(earnings_data, stock_data):
+    if earnings_data is None or earnings_data.empty:
+        return 0, 0  # No earnings impact features available
+    
+    latest_earnings = earnings_data.iloc[-1]
+    actual_earnings = latest_earnings['Actual EPS']
+    expected_earnings = latest_earnings['Expected EPS']
+    
+    # Earnings surprise (Actual - Expected)
+    earnings_surprise = actual_earnings - expected_earnings
+    
+    earnings_date = latest_earnings['Earnings Date']
+    
+    # Calculate price reaction after earnings (percentage change in stock price)
+    if earnings_date in stock_data.index:
+        price_reaction = stock_data.loc[earnings_date:]['Close'].pct_change().mean() * 100  # % change in price after earnings
+    else:
+        price_reaction = 0  # If earnings date is not within the stock data range
+
+    return earnings_surprise, price_reaction
+
+# Train Model with earnings features included
 @st.cache_resource
-def train_model(data):
+def train_model(data, earnings_surprise, price_reaction):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
-    
-    features = data[['Close', 'RSI', 'MACD', 'Volatility', 'On_Balance_Volume', 'SMA_20', 'SMA_50']]
+
+    # Add earnings features to the dataset
+    data['Earnings Surprise'] = earnings_surprise
+    data['Price Reaction'] = price_reaction
+
+    features = data[['Close', 'RSI', 'MACD', 'Volatility', 'On_Balance_Volume', 'SMA_20', 'SMA_50', 'Earnings Surprise', 'Price Reaction']]
     labels = data['Target']
     
     scaler = StandardScaler()
@@ -91,11 +126,11 @@ def train_model(data):
     best_model = grid_search.best_estimator_
     return best_model, grid_search.best_score_ * 100, X_test, y_test
 
-# Option Recommendation Function
-def generate_recommendation(data, sentiment_score, model):
+# Generate recommendation with earnings features
+def generate_recommendation(data, sentiment_score, model, earnings_surprise, price_reaction):
     latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['On_Balance_Volume'], latest_data['SMA_20'], latest_data['SMA_50']]])
-    
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['On_Balance_Volume'], latest_data['SMA_20'], latest_data['SMA_50'], earnings_surprise, price_reaction]])
+
     prediction_prob = model.predict_proba(latest_features)[0][1]
     option = "Call" if prediction_prob > 0.5 else "Put"
 
@@ -118,13 +153,18 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 if symbol:
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
-    model, accuracy, X_test, y_test = train_model(stock_data)
+    earnings_data = fetch_earnings_data(symbol)
+    
+    earnings_surprise, price_reaction = analyze_earnings_impact(earnings_data, stock_data)
+    
+    model, accuracy, X_test, y_test = train_model(stock_data, earnings_surprise, price_reaction)
 
     current_price = stock_data['Close'].iloc[-1]
 
     st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
 
-    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model)
+    # Generate the option recommendation
+    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, earnings_surprise, price_reaction)
 
     st.markdown(f"""
         <div class="recommendation">
@@ -137,6 +177,14 @@ if symbol:
     st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+    
+    # Displaying Earnings Data and Analysis
+    st.subheader("Earnings Report Impact")
+    if earnings_data is not None and not earnings_data.empty:
+        st.write(f"**Latest Earnings Surprise**: {earnings_surprise:.2f}")
+        st.write(f"**Price Reaction After Earnings**: {price_reaction:.2f}%")
+    else:
+        st.write("No recent earnings data available.")
 
     # Displaying Technical Indicators
     st.subheader('Technical Indicators and Their Current Values')
@@ -153,37 +201,12 @@ if symbol:
                         subplot_titles=('Stock Price', 'RSI Indicator', 'MACD Indicator'))
 
     fig.add_trace(go.Candlestick(x=stock_data.index,
-                open=stock_data['Open'], high=stock_data['High'], low=stock_data['Low'], close=stock_data['Close']),
-                row=1, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'),
-                  row=2, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'),
-                  row=3, col=1)
+                open=stock_data['Open'], high=stock_data['High'],
+                low=stock_data['Low'], close=stock_data['Close'], name='Price'), row=1, col=1)
 
-    fig.update_layout(title=f"{symbol} Stock Price and Technical Indicators",
-                      xaxis_title="Date", yaxis_title="Price")
-    st.plotly_chart(fig)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
 
-    # Displaying additional information
-    st.markdown("### Additional Technical Analysis")
-    st.write("**RSI** indicates if a stock is overbought (>70) or oversold (<30).")
-    st.write("**MACD** is used to identify changes in momentum.")
-    st.write("**On-Balance Volume** shows how volume is related to price movement.")
-    st.write("**SMA** indicates trend direction.")
-    
-    st.markdown("<br><br><div class='footer'>Made by Shriyan Kandula - Sophomore at Shaker High School.</div>", unsafe_allow_html=True)
-    
-# Key Features Section
-st.subheader("🌟 Key Features That Make It Stand Out")
-st.write("""
-- **Advanced Machine Learning Models**: Uses XGBoost, Random Forest, and GridSearchCV to optimize predictions.
-- **Comprehensive Technical Analysis**: Includes RSI, MACD, Bollinger Bands, and more.
-- **Real-Time Market Sentiment Analysis**: Fetches news headlines and applies sentiment analysis.
-- **Options Trading Recommendations**: Suggests actionable trades based on predicted price movements.
-- **User-Friendly & Professional UI**: Clean interface with interactive charts.
-- **Thorough Explanations**: Provides insights into each indicator and model accuracy.
-- **Built for Accuracy**: Implements hyperparameter tuning and real-time data.
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['MACD'], mode='lines', name='MACD'), row=3, col=1)
 
-🚀 **The app is a powerful AI-driven stock trading assistant that combines ML, technical indicators, and sentiment analysis to provide accurate, actionable insights. It’s more than just a predictor—it’s a decision-making tool for traders. 🔥**
-""")
+    st.plotly_chart(fig, use_container_width=True)
 
