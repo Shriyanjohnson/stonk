@@ -4,30 +4,17 @@ import pandas as pd
 import numpy as np
 import datetime
 import os
-import joblib
+import io
+from textblob import TextBlob
+from newsapi import NewsApiClient
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-import matplotlib.pyplot as plt
-import requests
-from textblob import TextBlob
 
-# NewsAPI Key (replace with your own)
-NEWSAPI_KEY = "833b7f0c6c7243b6b751715b243e4802"
-
-# Fetching news and sentiment for the stock
-def fetch_sentiment(symbol):
-    url = f"https://newsapi.org/v2/everything?q={symbol}&language=en&sortBy=publishedAt&pageSize=5&apiKey={NEWSAPI_KEY}"
-    response = requests.get(url)
-    articles = response.json()['articles']
-    
-    sentiment_score = 0
-    for article in articles:
-        blob = TextBlob(article['title'])
-        sentiment_score += blob.sentiment.polarity  # Sum of polarity (positive/negative)
-    
-    return sentiment_score / len(articles) if articles else 0
+# Set API Key
+API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
 
 # Custom On-Balance Volume (OBV) function
 def custom_on_balance_volume(df):
@@ -41,17 +28,6 @@ def custom_on_balance_volume(df):
             obv.append(obv[-1])
     df['OBV'] = obv
     return df
-
-# Save the trained model
-def save_model(model, filename="stock_model.pkl"):
-    joblib.dump(model, filename)
-
-# Load the trained model
-def load_model(filename="stock_model.pkl"):
-    if os.path.exists(filename):
-        return joblib.load(filename)
-    else:
-        return None
 
 # Fetch stock data
 @st.cache_data
@@ -70,48 +46,50 @@ def fetch_stock_data(symbol):
 def fetch_real_time_price(symbol):
     stock = yf.Ticker(symbol)
     real_time_data = stock.history(period="1d", interval="1m")
-    return real_time_data['Close'][-1]
+    return real_time_data['Close'][-1]  # Latest closing price
 
-# Train or update the model
-def train_or_update_model(data, model=None):
-    # Prepare the new data for training
+# Fetch sentiment score from news articles
+@st.cache_data
+def fetch_sentiment(symbol):
+    try:
+        newsapi = NewsApiClient(api_key=API_KEY)
+        articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
+        if not articles:
+            return 0
+        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
+        return sentiment_score
+    except:
+        return 0
+
+# Train Machine Learning Model
+@st.cache_resource
+def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
     labels = data['Target']
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
+    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
+    grid_search.fit(X_train, y_train)
+    best_model = grid_search.best_estimator_
+    return best_model, grid_search.best_score_ * 100, X_test, y_test
 
-    # If no model exists, initialize a new model
-    if model is None:
-        model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
-        model.fit(features_scaled, labels)
-    else:
-        model.fit(features_scaled, labels)  # For RandomForest, it will retrain with all data each time
-
-    save_model(model)  # Save the updated model
-
-    accuracy = model.score(features_scaled, labels) * 100
-    return model, accuracy
-
-# Generate options prediction
-def generate_options_prediction(real_time_price, model, features):
-    prediction = model.predict(features)
-    if prediction == 1:
-        predicted_movement = "Up"
-        strike_price = real_time_price * 1.05  # Strike price 5% above current price
-        option_type = "Call"
-    else:
-        predicted_movement = "Down"
-        strike_price = real_time_price * 0.95  # Strike price 5% below current price
-        option_type = "Put"
-
-    # Find the nearest Friday
-    today = datetime.date.today()
-    days_to_friday = (4 - today.weekday()) % 7
-    expiration_date = today + datetime.timedelta(days=days_to_friday)
-
-    return predicted_movement, strike_price, expiration_date, option_type
+# Option Recommendation Function
+def generate_recommendation(data, sentiment_score, model, symbol):
+    latest_data = data.iloc[-1]
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    prediction_prob = model.predict_proba(latest_features)[0][1]
+    option = "Call" if prediction_prob > 0.5 else "Put"
+    if sentiment_score > 0.2 and option == "Put":
+        option = "Call"
+    elif sentiment_score < -0.2 and option == "Call":
+        option = "Put"
+    strike_price = round(latest_data['Close'] / 10) * 10
+    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
+    return option, strike_price, expiration_date, latest_data
 
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰")
@@ -119,32 +97,26 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
     stock_data = fetch_stock_data(symbol)
+    sentiment_score = fetch_sentiment(symbol)
+    model, accuracy, X_test, y_test = train_model(stock_data)
+    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
+
+    # Fetch and display the real-time stock price
     real_time_price = fetch_real_time_price(symbol)
-    
-    # Load the existing model and update it
-    model = load_model()
-    model, accuracy = train_or_update_model(stock_data, model)
-    
-    sentiment_score = fetch_sentiment(symbol)  # Fetch Sentiment
 
-    st.subheader(f"📈 Stock Data for {symbol}")
-    st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
+    st.subheader(f"📈 Option Recommendation for {symbol}")
+    st.write(f"**Recommended Option:** {option}")
+    st.write(f"**Strike Price:** ${strike_price}")
+    st.write(f"**Expiration Date:** {expiration}")
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-    st.write(f"### Sentiment Score: **{sentiment_score:.2f}**")
+    test_accuracy = model.score(X_test, y_test) * 100
+    st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+    st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
 
-    # Generate options prediction
-    features = stock_data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
-    predicted_movement, strike_price, expiration_date, option_type = generate_options_prediction(real_time_price, model, features)
+    st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
 
-    st.write(f"### Predicted Price Movement: **{predicted_movement}**")
-    st.write(f"### Suggested Option: **{option_type}**")
-    st.write(f"### Strike Price: **${strike_price:.2f}**")
-    st.write(f"### Expiration Date: **{expiration_date}**")
-
-    # Plot stock data
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("Stock Price", "RSI", "OBV"))
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
     fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
-    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['OBV'], mode='lines', name='OBV'), row=3, col=1)
     st.plotly_chart(fig)
