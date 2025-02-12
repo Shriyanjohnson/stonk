@@ -3,8 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
-import os
-import io
 from textblob import TextBlob
 from newsapi import NewsApiClient
 from sklearn.ensemble import RandomForestClassifier
@@ -12,6 +10,7 @@ from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import time
 
 # Set API Key
 API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Store this securely
@@ -42,11 +41,25 @@ def fetch_stock_data(symbol):
     data.dropna(inplace=True)
     return data
 
-# Fetch real-time stock price
+# Fetch real-time stock price, including after-market hours
 def fetch_real_time_price(symbol):
     stock = yf.Ticker(symbol)
-    real_time_data = stock.history(period="1d", interval="1m")
-    return real_time_data['Close'][-1]  # Latest closing price
+    
+    # Fetch the latest minute-by-minute data for the stock for a wider time window
+    try:
+        real_time_data = stock.history(period="1d", interval="1m")  # 1-minute interval for real-time data
+        
+        # Ensure that we get the most recent closing price (handling after-market hours)
+        latest_data = real_time_data['Close'][-1]
+        
+        # In case the data isn't available, we try to use the last available price
+        if pd.isna(latest_data):
+            latest_data = real_time_data['Close'].iloc[-2]  # Use the previous price if the latest is unavailable
+        
+        return latest_data
+    except Exception as e:
+        st.error(f"Error fetching real-time price: {str(e)}")
+        return None
 
 # Fetch sentiment score from news articles
 @st.cache_data
@@ -91,32 +104,63 @@ def generate_recommendation(data, sentiment_score, model, symbol):
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
     return option, strike_price, expiration_date, latest_data
 
+# Function to periodically retrain the model
+def retrain_model(symbol):
+    # Fetch new stock data
+    stock_data = fetch_stock_data(symbol)
+    sentiment_score = fetch_sentiment(symbol)
+    
+    # Retrain model
+    model, accuracy, X_test, y_test = train_model(stock_data)
+    
+    # Generate new recommendation
+    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
+    
+    return option, strike_price, expiration, latest_data, model, accuracy
+
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
+    # Fetch and display data
     stock_data = fetch_stock_data(symbol)
     sentiment_score = fetch_sentiment(symbol)
+    
+    # Train or load model and evaluate
     model, accuracy, X_test, y_test = train_model(stock_data)
     option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
 
-    # Fetch and display the real-time stock price
+    # Fetch and display the real-time stock price, including after-market
     real_time_price = fetch_real_time_price(symbol)
 
+    # Display the results
     st.subheader(f"📈 Option Recommendation for {symbol}")
     st.write(f"**Recommended Option:** {option}")
     st.write(f"**Strike Price:** ${strike_price}")
     st.write(f"**Expiration Date:** {expiration}")
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+    
     test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-    st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
+    
+    if real_time_price:
+        st.write(f"### Real-Time Price (Including After-Market): **${real_time_price:.2f}**")
+    else:
+        st.write("### Real-Time Price: Data not available")
 
     st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
 
+    # Plotting stock data with Plotly
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
     fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
     st.plotly_chart(fig)
+
+    # Simulate retraining after every 24 hours
+    retrain_interval = 86400  # 24 hours in seconds
+    while True:
+        time.sleep(retrain_interval)  # Sleep for the given interval
+        option, strike_price, expiration, latest_data, model, accuracy = retrain_model(symbol)
+        st.write(f"### Retrained Model: Recommended Option is {option}")
