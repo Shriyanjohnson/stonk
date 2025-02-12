@@ -157,6 +157,15 @@ if symbol:
     # Show the chart
     st.plotly_chart(fig, use_container_width=True)
 
+    # Add download button for the data
+    csv = stock_data.to_csv(index=True)  # Convert data to CSV format
+    st.download_button(
+        label="Download Stock Data",
+        data=csv,
+        file_name=f"{symbol}_stock_data.csv",
+        mime="text/csv",
+    )
+
     # Disclaimer
     st.markdown(""" **Disclaimer:** This application is for informational purposes only and does not constitute financial advice. Please conduct your own due diligence before making any investment decisions. """)
 
