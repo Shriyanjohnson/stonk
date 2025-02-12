@@ -64,25 +64,9 @@ def fetch_fundamentals(symbol):
     earnings = stock.quarterly_earnings
     return eps, earnings
 
-# Calculate Options Expiry for the current week (next Friday)
-def get_next_friday():
-    today = datetime.datetime.now()
-    days_until_friday = 4 - today.weekday()
-    if days_until_friday <= 0:
-        days_until_friday += 7
-    next_friday = today + datetime.timedelta(days=days_until_friday)
-    return next_friday.strftime('%Y-%m-%d')
-
-# Predict stock price (just an example)
-def predict_stock_price(model, data):
-    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-    predicted_price = model.predict(features_scaled[-1:])
-    return predicted_price[0]
-
 # Train or update the model
 def train_or_update_model(data, eps, model=None):
+    # Prepare the new data for training
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
@@ -95,18 +79,21 @@ def train_or_update_model(data, eps, model=None):
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
 
+    # If no model exists, initialize a new model
     if model is None:
         model = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
         model.fit(features_scaled, labels)
     else:
-        model.fit(features_scaled, labels)
+        # Append new data to the existing features and labels (Random Forest will retrain with all data)
+        model.fit(features_scaled, labels)  # For RandomForest, it will retrain with all data each time
 
-    save_model(model)
+    save_model(model)  # Save the updated model
+
     accuracy = model.score(features_scaled, labels) * 100
     return model, accuracy
 
 # Streamlit UI
-st.title("💰 AI Stock Options Predictor 💰", style="color: white;")
+st.markdown("<h1 style='color: white;'>💰 AI Stock Options Predictor 💰</h1>", unsafe_allow_html=True)
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 # Set the background to dark
@@ -117,6 +104,10 @@ st.markdown("""
             color: white;
         }
         .stTextInput>label {
+            color: white;
+        }
+        .stButton>button {
+            background-color: #4CAF50;
             color: white;
         }
     </style>
@@ -131,13 +122,9 @@ if symbol:
     model, accuracy = train_or_update_model(stock_data, eps, model)
     
     real_time_price = fetch_real_time_price(symbol)
-    price_prediction = predict_stock_price(model, stock_data)
-    next_friday = get_next_friday()
 
     st.subheader(f"📈 Stock Data for {symbol}")
     st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
-    st.write(f"### Predicted Price for Next Session: **${price_prediction:.2f}**")
-    st.write(f"### Next Options Expiry (Friday): **{next_friday}**")
     if eps:
         st.write(f"### EPS (Earnings Per Share): **${eps:.2f}**")
     else:
@@ -159,7 +146,7 @@ if symbol:
     else:
         st.write("No earnings report available.")
 
-    # Plot Accuracy Over Time
+    # Plot Accuracy Over Time (if model has been updated multiple times)
     if os.path.exists("model_accuracy.txt"):
         accuracy_data = []
         with open("model_accuracy.txt", "r") as f:
