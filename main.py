@@ -1,7 +1,9 @@
 import yfinance as yf
 import streamlit as st
-from ta.momentum import RSIIndicator
-from ta.trend import MACD
+from ta.momentum import RSIIndicator, StochasticOscillator
+from ta.trend import MACD, ADXIndicator, EMAIndicator
+from ta.volatility import BollingerBands
+from ta.volume import OnBalanceVolumeIndicator
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
@@ -11,8 +13,10 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import os
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# Custom HTML & CSS Styling for a Clean, Professional UI
+# Custom HTML & CSS Styling
 st.markdown("""
     <style>
         .title {
@@ -51,15 +55,23 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Function to fetch stock data and calculate technical indicators
+# Function to fetch stock data and calculate additional indicators
 def fetch_stock_data(symbol):
     try:
         stock = yf.Ticker(symbol)
         data = stock.history(period="90d")
         
-        # Calculate Technical Indicators
+        # Technical Indicators
         data['RSI'] = RSIIndicator(data['Close']).rsi()
         data['MACD'] = MACD(data['Close']).macd()
+        data['Stochastic'] = StochasticOscillator(data['High'], data['Low'], data['Close']).stoch()
+        bb = BollingerBands(data['Close'])
+        data['BB_Upper'] = bb.bollinger_hband()
+        data['BB_Lower'] = bb.bollinger_lband()
+        data['ADX'] = ADXIndicator(data['High'], data['Low'], data['Close']).adx()
+        data['EMA_50'] = EMAIndicator(data['Close'], window=50).ema_indicator()
+        data['EMA_200'] = EMAIndicator(data['Close'], window=200).ema_indicator()
+        data['OBV'] = OnBalanceVolumeIndicator(data['Close'], data['Volume']).on_balance_volume()
         data['Volatility'] = data['Close'].pct_change().rolling(10).std()
         data['SMA_20'] = data['Close'].rolling(window=20).mean()
         data['SMA_50'] = data['Close'].rolling(window=50).mean()
@@ -93,7 +105,7 @@ def train_model(data):
         data['Price Change'] = data['Close'].diff()
         data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
         
-        features = data[['Close', 'RSI', 'MACD', 'Volatility', 'SMA_20', 'SMA_50']]
+        features = data[['Close', 'RSI', 'MACD', 'Stochastic', 'BB_Upper', 'BB_Lower', 'ADX', 'EMA_50', 'EMA_200', 'OBV', 'Volatility', 'SMA_20', 'SMA_50']]
         labels = data['Target']
         
         # Standardize Features
@@ -115,7 +127,7 @@ def train_model(data):
 # Generate Option Recommendation Based on Latest Data and Sentiment
 def generate_recommendation(data, sentiment_score, model):
     latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Stochastic'], latest_data['BB_Upper'], latest_data['BB_Lower'], latest_data['ADX'], latest_data['EMA_50'], latest_data['EMA_200'], latest_data['OBV'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50']]])
     
     # Predict Probability of Price Going Up
     prediction_prob = model.predict_proba(latest_features)[0][1]
@@ -162,11 +174,36 @@ if symbol:
             st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
             test_accuracy = model.score(X_test, y_test) * 100
             st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
+            
+            # Interactive Charts for Technical Indicators
+            fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.1,
+                                subplot_titles=("Price and Indicators", "Volume & OBV", "RSI and Sentiment"))
+
+            # Price and Indicators
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], name="Price", line=dict(color='blue')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], name="SMA 20", line=dict(color='orange')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], name="SMA 50", line=dict(color='green')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['EMA_50'], name="EMA 50", line=dict(color='red')), row=1, col=1)
+
+            # Volume & OBV
+            fig.add_trace(go.Bar(x=stock_data.index, y=stock_data['Volume'], name="Volume", marker=dict(color='grey')), row=2, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['OBV'], name="OBV", line=dict(color='purple')), row=2, col=1)
+
+            # RSI and Sentiment
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], name="RSI", line=dict(color='black')), row=3, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=[sentiment_score] * len(stock_data), name="Sentiment", line=dict(color='red', dash='dash')), row=3, col=1)
+
+            fig.update_layout(height=800, title=f"Technical Indicators for {symbol}")
+            st.plotly_chart(fig)
+
+            # Provide CSV Download for Stock Data
+            st.download_button("Download Stock Data as CSV", stock_data.to_csv(), file_name=f"{symbol}_stock_data.csv")
+            
         else:
             st.warning("Model training failed. Please try again.")
 else:
     st.info("Please enter a valid stock symbol.")
-    
+
 # Footer
 st.markdown("""
     <div class="footer">
