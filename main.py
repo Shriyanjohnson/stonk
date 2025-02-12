@@ -120,3 +120,12 @@ if symbol:
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
     st.plotly_chart(fig)
+
+    # Text explaining the model functionality
+    st.markdown("""
+    ### Model Functionality:
+    This AI-driven model uses a combination of **technical indicators** like RSI, ATR, OBV, and **SMA** along with **sentiment analysis** from the latest news articles to predict whether the stock price will go up or down. It also factors in **historical stock performance** and **volatility** indicators to provide highly accurate options predictions.
+    
+    ### What Sets This Model Apart:
+    Unlike basic models that rely solely on technical indicators, this model also incorporates **market sentiment** by analyzing real-time news, giving it an edge over traditional predictive tools. Additionally, it is continuously trained with new data, improving its performance over time and providing a robust approach to options prediction.
+    """)
