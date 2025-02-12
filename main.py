@@ -2,21 +2,21 @@ import yfinance as yf
 import streamlit as st
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
+from ta.volume import OnBalanceVolume
+from ta.trend import ADXIndicator
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.ensemble import RandomForestClassifier, StackingClassifier
+from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.preprocessing import StandardScaler
-from dotenv import load_dotenv
-
-# Load environment variables (for API key)
-load_dotenv()
 
 # Custom HTML & CSS Styling
 st.markdown("""
@@ -60,10 +60,7 @@ st.markdown("""
 # Function to fetch stock data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
-    data = stock.history(period="1y")  # Increased period to 1 year
-    
-    if len(data) < 30:
-        return None  # Return None if not enough data
+    data = stock.history(period="90d")
     
     # Technical Indicators
     data['RSI'] = RSIIndicator(data['Close']).rsi()
@@ -71,8 +68,10 @@ def fetch_stock_data(symbol):
     data['Volatility'] = data['Close'].pct_change().rolling(10).std()
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
+    data['OBV'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
+    data['ADX'] = ADXIndicator(data['High'], data['Low'], data['Close']).adx()
     
-    # Handle NaN values
+    # Drop NaN values
     data.dropna(inplace=True)
     
     return data
@@ -82,7 +81,7 @@ def fetch_sentiment(symbol):
     try:
         api_key = os.getenv("NEWSAPI_KEY")
         if not api_key:
-            return 0  # Return neutral sentiment if no key is provided
+            return 0
         newsapi = NewsApiClient(api_key=api_key)
         articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
         if not articles:
@@ -90,35 +89,50 @@ def fetch_sentiment(symbol):
         sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
         return sentiment_score
     except Exception as e:
+        print(f"Error fetching sentiment: {e}")
         return 0
 
-# Train Model with Cross-Validation
+# Function to train model using ensemble stacking
 def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     
-    features = data[['Close', 'RSI', 'MACD', 'Volatility', 'SMA_20', 'SMA_50']]
+    features = data[['Close', 'RSI', 'MACD', 'Volatility', 'SMA_20', 'SMA_50', 'OBV', 'ADX']]
     labels = data['Target']
     
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
 
-    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
+    # TimeSeries Cross-Validation
+    tscv = TimeSeriesSplit(n_splits=5)
+    for train_index, test_index in tscv.split(features_scaled):
+        X_train, X_test = features_scaled[train_index], features_scaled[test_index]
+        y_train, y_test = labels[train_index], labels[test_index]
     
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    cv_scores = cross_val_score(model, X_train, y_train, cv=5)
+    # Base models for stacking
+    base_models = [
+        ('lr', LogisticRegression(random_state=42)),
+        ('rf', RandomForestClassifier(n_estimators=100, random_state=42)),
+        ('svm', SVC(kernel='linear', random_state=42))
+    ]
     
-    model.fit(X_train, y_train)
-    return model, cv_scores.mean() * 100, X_test, y_test
+    # Stacked model
+    stacked_model = StackingClassifier(estimators=base_models, final_estimator=LogisticRegression())
+    
+    # Train the stacked model
+    stacked_model.fit(X_train, y_train)
+    
+    return stacked_model, X_test, y_test
 
-# Option Recommendation Function
+# Function to generate option recommendation
 def generate_recommendation(data, sentiment_score, model):
     latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50']]])
+    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['MACD'], latest_data['Volatility'], latest_data['SMA_20'], latest_data['SMA_50'], latest_data['OBV'], latest_data['ADX']]])
     
     prediction_prob = model.predict_proba(latest_features)[0][1]
     option = "Call" if prediction_prob > 0.5 else "Put"
 
+    # Adjust based on sentiment score
     if sentiment_score > 0.2 and option == "Put":
         option = "Call"
     elif sentiment_score < -0.2 and option == "Call":
@@ -137,49 +151,52 @@ symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
     stock_data = fetch_stock_data(symbol)
-    if stock_data is None:
-        st.error("Not enough data to proceed with prediction. Please check the stock symbol or try again later.")
-    else:
-        sentiment_score = fetch_sentiment(symbol)
-        model, accuracy, X_test, y_test = train_model(stock_data)
+    sentiment_score = fetch_sentiment(symbol)
+    model, X_test, y_test = train_model(stock_data)
 
-        current_price = stock_data['Close'].iloc[-1]
+    current_price = stock_data['Close'].iloc[-1]
+    
+    # Display Current Price
+    st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
 
-        st.markdown(f'<div class="current-price">Current Price of {symbol}: **${current_price:.2f}**</div>', unsafe_allow_html=True)
+    # Display recommendation
+    option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
+    st.markdown(f"""
+        <div class="recommendation">
+            <h3>Option Recommendation: **{option}**</h3>
+            <p>Strike Price: **${strike_price}**</p>
+            <p>Expiration Date: **{expiration}**</p>
+        </div>
+    """, unsafe_allow_html=True)
 
-        option, strike_price, expiration = generate_recommendation(stock_data, sentiment_score, model)
+    # Display model performance
+    accuracy = model.score(X_test, y_test) * 100
+    st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
+    
+    # Downloadable data
+    st.download_button(
+        label="Download Data",
+        data=stock_data.to_csv(index=False),
+        file_name=f"{symbol}_stock_data.csv",
+        mime="text/csv"
+    )
 
-        st.markdown(f"""
-            <div class="recommendation">
-                <h3>Option Recommendation: **{option}**</h3>
-                <p>Strike Price: **${strike_price}**</p>
-                <p>Expiration Date: **{expiration}**</p>
-            </div>
-        """, unsafe_allow_html=True)
+    # Plotting technical indicators
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1)
+    
+    # Price & SMAs
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], mode='lines', name='Price'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='SMA 20'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='SMA 50'), row=1, col=1)
+    
+    # RSI
+    fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
 
-        st.markdown(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-        test_accuracy = model.score(X_test, y_test) * 100
-        st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
-        
-        # Visualizing Stock Data and Indicators in Charts
-        fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                            vertical_spacing=0.1, subplot_titles=('Stock Price & EMAs', 'Volume & OBV', 'RSI & Sentiment'))
+    st.plotly_chart(fig)
 
-        # Stock Price and EMAs
-        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], mode='lines', name='Close Price'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], mode='lines', name='20-Day SMA'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], mode='lines', name='50-Day SMA'), row=1, col=1)
-
-        # Volume and OBV
-        fig.add_trace(go.Bar(x=stock_data.index, y=stock_data['Volume'], name='Volume'), row=2, col=1)
-        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'].cumsum(), mode='lines', name='OBV'), row=2, col=1)
-
-        # RSI and Sentiment
-        fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=3, col=1)
-        fig.add_trace(go.Scatter(x=stock_data.index, y=[sentiment_score] * len(stock_data), mode='lines', name='Sentiment', line=dict(dash='dash')), row=3, col=1)
-
-        fig.update_layout(title=f"{symbol} Stock Data and Indicators", height=900)
-        st.plotly_chart(fig)
-
-# Footer Information
-st.markdown('<div class="footer">Made with ❤️ by Shriyan Kandula for educational purposes.</div>', unsafe_allow_html=True)
+# Footer
+st.markdown("""
+    <div class="footer">
+        Created by **Shriyan Kandula** | 💻 Stock Predictions & Insights
+    </div>
+""", unsafe_allow_html=True)
