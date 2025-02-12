@@ -61,6 +61,10 @@ def fetch_stock_data(symbol):
         stock = yf.Ticker(symbol)
         data = stock.history(period="90d")
         
+        # Check if data is empty
+        if data.empty:
+            return None
+        
         # Technical Indicators
         data['RSI'] = RSIIndicator(data['Close']).rsi()
         data['MACD'] = MACD(data['Close']).macd()
@@ -76,8 +80,13 @@ def fetch_stock_data(symbol):
         data['SMA_20'] = data['Close'].rolling(window=20).mean()
         data['SMA_50'] = data['Close'].rolling(window=50).mean()
         
-        # Drop NaN values
+        # Drop NaN values if there are any
         data.dropna(inplace=True)
+
+        # Check if there is enough data after NaN removal
+        if len(data) < 30:  # Arbitrary threshold (e.g., 30 rows needed for model)
+            return None
+
         return data
     except Exception as e:
         st.error(f"Error fetching stock data: {e}")
@@ -180,33 +189,23 @@ if symbol:
                                 subplot_titles=("Price and Indicators", "Volume & OBV", "RSI and Sentiment"))
 
             # Price and Indicators
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], name="Price", line=dict(color='blue')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_20'], name="SMA 20", line=dict(color='orange')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['SMA_50'], name="SMA 50", line=dict(color='green')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['EMA_50'], name="EMA 50", line=dict(color='red')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'], mode='lines', name='Close Price'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['EMA_50'], mode='lines', name='50-Day EMA'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['EMA_200'], mode='lines', name='200-Day EMA'), row=1, col=1)
 
-            # Volume & OBV
-            fig.add_trace(go.Bar(x=stock_data.index, y=stock_data['Volume'], name="Volume", marker=dict(color='grey')), row=2, col=1)
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['OBV'], name="OBV", line=dict(color='purple')), row=2, col=1)
+            # Volume and OBV
+            fig.add_trace(go.Bar(x=stock_data.index, y=stock_data['Volume'], name='Volume'), row=2, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['OBV'], mode='lines', name='OBV'), row=2, col=1)
 
             # RSI and Sentiment
-            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], name="RSI", line=dict(color='black')), row=3, col=1)
-            fig.add_trace(go.Scatter(x=stock_data.index, y=[sentiment_score] * len(stock_data), name="Sentiment", line=dict(color='red', dash='dash')), row=3, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=3, col=1)
+            fig.add_trace(go.Scatter(x=stock_data.index, y=[sentiment_score] * len(stock_data), mode='lines', name='Sentiment', line=dict(dash='dash')), row=3, col=1)
 
-            fig.update_layout(height=800, title=f"Technical Indicators for {symbol}")
+            fig.update_layout(title=f"{symbol} Stock Data and Indicators", height=900)
             st.plotly_chart(fig)
 
-            # Provide CSV Download for Stock Data
-            st.download_button("Download Stock Data as CSV", stock_data.to_csv(), file_name=f"{symbol}_stock_data.csv")
-            
-        else:
-            st.warning("Model training failed. Please try again.")
-else:
-    st.info("Please enter a valid stock symbol.")
+    else:
+        st.error("Not enough data to proceed with prediction. Please check the stock symbol or try again later.")
 
-# Footer
-st.markdown("""
-    <div class="footer">
-        Created by **Shriyan Kandula** | 💻 Stock Predictions & Insights
-    </div>
-""", unsafe_allow_html=True)
+# Footer Information
+st.markdown('<div class="footer">Made with ❤️ by Shriyan Kandula for educational purposes.</div>', unsafe_allow_html=True)
