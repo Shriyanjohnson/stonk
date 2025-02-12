@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Set API Key
-API_KEY = "your_newsapi_key_here"  # Use your actual API key
+API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Your provided API key
 
 # Custom On-Balance Volume (OBV) function
 def custom_on_balance_volume(df):
@@ -48,7 +48,8 @@ def fetch_stock_data(symbol):
     except Exception as e:
         data['Earnings'] = np.nan  # If fetching earnings fails, set it as NaN
 
-    data.dropna(inplace=True)
+    # Drop rows with NaN values and reset the index
+    data = data.dropna()
     return data
 
 # Fetch real-time stock price
@@ -74,6 +75,10 @@ def train_model(data):
     data['Price Change'] = data['Close'].diff()
     data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
     features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50', 'Earnings']]
+
+    # Drop any rows with NaN or infinite values in features before training the model
+    features = features.replace([np.inf, -np.inf], np.nan).dropna()
+
     labels = data['Target']
     scaler = StandardScaler()
     features_scaled = scaler.fit_transform(features)
@@ -148,3 +153,6 @@ st.write("""
 
     By combining various technical indicators, machine learning, and real-time sentiment, this tool provides you with data-driven insights for better trading decisions.
 """)
+
+
+    
