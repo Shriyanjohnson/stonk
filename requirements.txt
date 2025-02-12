@@ -8,4 +8,6 @@ textblob
 beautifulsoup4
 requests
 streamlit
+newsapi-python
+
 
