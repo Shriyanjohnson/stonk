@@ -2,17 +2,14 @@ import yfinance as yf
 import streamlit as st
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
-from ta.volume import OnBalanceVolume
+import pandas as pd
+import numpy as np
 from textblob import TextBlob
 from newsapi import NewsApiClient
 import datetime
-import numpy as np
+import os
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split, GridSearchCV
-import pandas as pd
-import os
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from sklearn.preprocessing import StandardScaler
 
 # Custom HTML & CSS Styling
@@ -54,7 +51,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Function to fetch stock data
+# Function to calculate On-Balance Volume (OBV)
+def on_balance_volume(df):
+    obv = [0]  # The first OBV value is set to 0
+    for i in range(1, len(df)):
+        if df['Close'][i] > df['Close'][i-1]:
+            obv.append(obv[-1] + df['Volume'][i])
+        elif df['Close'][i] < df['Close'][i-1]:
+            obv.append(obv[-1] - df['Volume'][i])
+        else:
+            obv.append(obv[-1])  # No change if close price is the same
+    return pd.Series(obv, index=df.index)
+
+# Fetch stock data and calculate OBV manually
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="90d")
@@ -62,7 +71,7 @@ def fetch_stock_data(symbol):
     # Technical Indicators
     data['RSI'] = RSIIndicator(data['Close']).rsi()
     data['MACD'] = MACD(data['Close']).macd()
-    data['OnBalanceVolume'] = OnBalanceVolume(data['Close'], data['Volume']).on_balance_volume()
+    data['OnBalanceVolume'] = on_balance_volume(data)  # Using custom OBV function
     data['Volatility'] = data['Close'].pct_change().rolling(10).std()
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_50'] = data['Close'].rolling(window=50).mean()
