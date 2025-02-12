@@ -1,5 +1,5 @@
 numpy
-ta-lib
+pandas_ta
 yfinance
 scikit-learn
 pandas
