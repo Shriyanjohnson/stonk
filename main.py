@@ -137,3 +137,32 @@ if symbol:
     - **Accurate and Reliable Data:** Real-time stock prices and regularly updated indicators ensure that you always have the most current information at your fingertips.
     - **User-Friendly Interface:** Designed with clarity and simplicity, allowing easy access to key insights and recommendations.
     """)
+
+    # Indicator values and trend explanation
+    st.write("### Indicator Values and Trend Analysis:")
+    st.write(f"**RSI (Relative Strength Index):** {latest_data['RSI']:.2f}")
+    if latest_data['RSI'] < 30:
+        st.write("The RSI indicates that the stock is potentially oversold, suggesting a possible upward trend.")
+    elif latest_data['RSI'] > 70:
+        st.write("The RSI indicates that the stock is potentially overbought, suggesting a possible downward trend.")
+    else:
+        st.write("The RSI indicates neutral market conditions, and further analysis is needed.")
+
+    st.write(f"**ATR (Average True Range):** {latest_data['ATR']:.2f}")
+    if latest_data['ATR'] > 1.5:
+        st.write("A high ATR value indicates high volatility, which might suggest a strong move up or down.")
+    else:
+        st.write("A low ATR indicates low volatility, suggesting a more stable market environment.")
+
+    st.write(f"**OBV (On-Balance Volume):** {latest_data['OBV']}")
+    if latest_data['OBV'] > 0:
+        st.write("Positive OBV suggests that buying volume is driving the stock price up, indicating an uptrend.")
+    else:
+        st.write("Negative OBV suggests that selling volume is increasing, indicating a downtrend.")
+
+    st.write(f"**SMA-20 (20-Day Simple Moving Average):** {latest_data['SMA_20']:.2f}")
+    st.write(f"**SMA-50 (50-Day Simple Moving Average):** {latest_data['SMA_50']:.2f}")
+    if latest_data['SMA_20'] > latest_data['SMA_50']:
+        st.write("The stock price is above the 50-day moving average, suggesting a potential upward trend.")
+    else:
+        st.write("The stock price is below the 50-day moving average, indicating a potential downward trend.")
