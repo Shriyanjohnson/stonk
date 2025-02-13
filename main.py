@@ -1,4 +1,4 @@
-import yfinance as yf
+    import yfinance as yf
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -93,17 +93,7 @@ def generate_recommendation(data, sentiment_score, model, symbol):
     return option, strike_price, expiration_date, latest_data
 
 # Streamlit UI
-st.title("💰 AI Stock Options Predictor by Shriyan Kandula 💰")
-
-# Explanation section
-st.markdown("""
-### Explanation of Indicators:
-- **RSI (Relative Strength Index)**: Measures the strength of a stock's price movement. RSI above 70 indicates the stock might be overbought (potential for price to go down). RSI below 30 indicates it might be oversold (potential for price to go up).
-- **ATR (Average True Range)**: Indicates the volatility of the stock. Higher ATR values suggest the stock is more volatile, and lower ATR values suggest less volatility.
-- **OBV (On-Balance Volume)**: Tracks volume flow and can help predict price movements. A rising OBV with rising prices suggests strength, while falling OBV may suggest weakness.
-- **SMA (Simple Moving Averages)**: Indicates trends based on past closing prices. A crossover of SMA_20 above SMA_50 suggests an uptrend, while the reverse suggests a downtrend.
-""")
-
+st.title("💰 AI Stock Options Predictor 💰")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
@@ -126,21 +116,8 @@ if symbol:
 
     st.download_button("Download Stock Data", data=stock_data.to_csv(index=True), file_name=f"{symbol}_stock_data.csv", mime="text/csv")
 
-    # Add chart with explanations
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Stock Price', 'RSI'))
     fig.add_trace(go.Candlestick(x=stock_data.index, open=stock_data['Open'], high=stock_data['High'], 
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
     st.plotly_chart(fig)
-
-    # Explanation of prediction reasoning
-    st.markdown("""
-    ### Why the Prediction?
-    The model is predicting the stock direction based on multiple factors:
-    - **RSI**: If RSI is above 70, it's typically overbought, indicating the potential for a price decrease.
-    - **ATR**: Higher volatility indicates a higher chance of significant price movement.
-    - **OBV**: A rising OBV signals that the buying volume is higher, possibly indicating the stock is bullish.
-    - **SMA Crossover**: If the shorter SMA (SMA_20) is above the longer SMA (SMA_50), it indicates a bullish signal, and vice versa for a bearish signal.
-    
-    Additionally, sentiment from recent news articles can tilt the recommendation to confirm whether the stock is likely to go up or down.
-    """)
