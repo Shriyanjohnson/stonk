@@ -38,14 +38,26 @@ def fetch_all_tickers():
         "count": 5000,  # Change this count based on how many tickers you want to load at once
     }
     response = requests.get(url, params=params)
-    data = response.json()
-    tickers = [stock['symbol'] for stock in data['finance']['result'][0]['quotes']]
-    return tickers
+    
+    # Print the raw response to see what the API is returning
+    st.write("Raw Response Content:", response.text)
+    
+    try:
+        # Attempt to decode the JSON response
+        data = response.json()
+        tickers = [stock['symbol'] for stock in data['finance']['result'][0]['quotes']]
+        return tickers
+    except requests.exceptions.JSONDecodeError as e:
+        st.error(f"Error decoding JSON response: {e}")
+        st.write(f"Response Content: {response.text}")
+        return []
 
-# Function to filter out stocks based on market criteria
-def filter_trending_stocks(tickers):
+# Get trending stocks
+@st.cache_data
+def get_trending_stocks():
+    tickers = fetch_all_tickers()  # Fetch all tickers dynamically
     trending_stocks = []
-
+    
     for symbol in tickers:
         try:
             stock_data = fetch_stock_data(symbol)
@@ -60,64 +72,6 @@ def filter_trending_stocks(tickers):
     
     trending_stocks.sort(key=lambda x: abs(x[2]), reverse=True)  # Sort by the strongest trend
     return trending_stocks[:5]  # Show the top 5 trending stocks
-
-# Function to check if ticker is valid
-def is_valid_ticker(symbol):
-    try:
-        stock = yf.Ticker(symbol)
-        return stock.history(period="1d") is not None
-    except:
-        return False
-
-# Function to fetch sentiment from news API
-def fetch_sentiment(symbol):
-    newsapi = NewsApiClient(api_key=API_KEY)
-    try:
-        articles = newsapi.get_everything(q=symbol, language='en', sort_by='publishedAt', page_size=5)
-        sentiment_score = 0
-        for article in articles['articles']:
-            text = article['title'] + " " + article['description']
-            sentiment_score += TextBlob(text).sentiment.polarity
-        return sentiment_score / len(articles['articles']) if len(articles['articles']) > 0 else 0
-    except Exception as e:
-        st.error(f"Error fetching news sentiment for {symbol}: {e}")
-        return 0
-
-# Function to generate stock options recommendation
-def generate_recommendation(stock_data, sentiment_score, model, symbol):
-    # Example placeholder logic for generating recommendations
-    latest_price = stock_data['Close'].iloc[-1]
-    strike_price = latest_price * 1.05 if sentiment_score > 0 else latest_price * 0.95
-    expiration = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%Y-%m-%d')
-    option = 'Call' if sentiment_score > 0 else 'Put'
-    return option, strike_price, expiration, stock_data.iloc[-1]
-
-# Function to train model on stock data
-def train_model(stock_data):
-    X = stock_data[['RSI', 'ATR', 'SMA_20', 'SMA_50']]  # Example features
-    y = np.where(stock_data['Close'].shift(-1) > stock_data['Close'], 1, 0)  # Target: 1 if next day price is higher
-
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    # Model training
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
-
-    # Model accuracy
-    accuracy = model.score(X_test, y_test) * 100
-    return model, accuracy, X_test, y_test
-
-# Function to track model performance
-def track_performance(model, X_test, y_test):
-    accuracy = model.score(X_test, y_test) * 100
-    return accuracy
-
-# Function to fetch real-time price
-def fetch_real_time_price(symbol):
-    stock = yf.Ticker(symbol)
-    real_time_data = stock.history(period="1d")
-    return real_time_data['Close'].iloc[-1]
 
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰\n Made by Shriyan Kandula")
@@ -175,8 +129,7 @@ if symbol:
 
 # New Feature: Trending Stocks
 st.subheader("🚀 Trending Stocks")
-tickers = fetch_all_tickers()  # Fetch all tickers dynamically
-trending_stocks = filter_trending_stocks(tickers)
+trending_stocks = get_trending_stocks()
 for stock in trending_stocks:
     st.write(f"**{stock[0]}**: {stock[1]} ({stock[2]*100:.2f}%)")
     stock_data = fetch_stock_data(stock[0])
