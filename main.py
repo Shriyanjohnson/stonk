@@ -144,3 +144,18 @@ if symbol:
     st.write(f"**SMA_20 (20-period Simple Moving Average):** {latest_data['SMA_20']:.2f} - A rising SMA_20 could indicate an uptrend, while a falling SMA_20 could suggest a downtrend.")
     st.write(f"**SMA_50 (50-period Simple Moving Average):** {latest_data['SMA_50']:.2f} - A crossover above the 50-day SMA could indicate bullish movement (uptrend).")
     st.write(f"**OBV (On-Balance Volume):** {latest_data['OBV']:.2f} - A rising OBV suggests increasing buying pressure (uptrend), while a falling OBV signals a downtrend.")
+
+# Explanation of functionality and benefits over competitors
+st.subheader("🔍 How It Works & Why It's Better Than Competitors")
+st.write("""
+This tool combines a range of advanced features to give you the best insights for stock option predictions:
+
+- **Comprehensive Data Sources:** Integrates historical stock data, real-time price updates, and sentiment analysis from news articles to give a well-rounded view of the market.
+- **Custom Indicators:** Utilizes On-Balance Volume (OBV) and Average True Range (ATR), alongside standard indicators like RSI and moving averages, to enhance the accuracy of predictions.
+- **Machine Learning Power:** Employs a Random Forest model trained on real data, with a high level of accuracy achieved through hyperparameter tuning. Unlike many competitors, this tool continuously refines its predictions for improved accuracy.
+- **Sentiment Analysis:** News sentiment is factored into decision-making, providing an extra layer of market insight that most competitors don't offer.
+- **Easy-to-Use Interface:** Designed with simplicity in mind, this app presents crucial stock information in a clean and user-friendly format. It's perfect for both novice and experienced traders.
+- **Automated Alerts:** The tool alerts you when there’s a high probability of a certain stock movement, allowing you to make decisions quickly.
+
+Unlike other stock prediction tools, this one takes into account real-time market sentiment and incorporates comprehensive technical indicators for smarter, data-backed decisions.
+""")
