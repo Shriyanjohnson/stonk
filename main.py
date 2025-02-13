@@ -178,5 +178,5 @@ for stock in trending_stocks:
     stock_data = fetch_stock_data(stock[0])
     sentiment_score = fetch_sentiment(stock[0])
     model, accuracy, X_test, y_test = train_model(stock_data)
-    option, strike_price, expiration, _ = generate_recommendation(stock_data, sentiment_score, model, stock[0])
-    st.write(f"  - **Recommended Option:** {option} | **Strike Price:** ${strike_price} | **Expiration Date:** {expiration}")
+    option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, stock[0])
+    st.write(f"**Recommended Option:** {option} | **Strike Price:** ${strike_price} | **Expiration Date:** {expiration}")
