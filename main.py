@@ -11,24 +11,12 @@ from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import difflib  # For finding the closest matching symbols
+import requests  # To fetch all available tickers dynamically
 
 # Set API Key directly
 API_KEY = "833b7f0c6c7243b6b751715b243e4802"  # Ensure you handle the API key securely
 
-# Custom On-Balance Volume (OBV) function
-def custom_on_balance_volume(df):
-    obv = [0]
-    for i in range(1, len(df)):
-        if df['Close'][i] > df['Close'][i - 1]:
-            obv.append(obv[-1] + df['Volume'][i])
-        elif df['Close'][i] < df['Close'][i - 1]:
-            obv.append(obv[-1] - df['Volume'][i])
-        else:
-            obv.append(obv[-1])
-    df['OBV'] = obv
-    return df
-
-# Fetch stock data
+# Function to fetch stock data
 @st.cache_data
 def fetch_stock_data(symbol):
     stock = yf.Ticker(symbol)
@@ -41,98 +29,95 @@ def fetch_stock_data(symbol):
     data.dropna(inplace=True)
     return data
 
-# Fetch real-time stock price
-def fetch_real_time_price(symbol):
-    stock = yf.Ticker(symbol)
-    real_time_data = stock.history(period="1d", interval="1m")
-    return real_time_data['Close'][-1]  # Latest closing price
+# Function to fetch all tickers from an exchange (e.g., NASDAQ)
+def fetch_all_tickers():
+    url = "https://query1.finance.yahoo.com/v7/finance/screener"
+    params = {
+        "region": "US",
+        "lang": "en",
+        "count": 5000,  # Change this count based on how many tickers you want to load at once
+    }
+    response = requests.get(url, params=params)
+    data = response.json()
+    tickers = [stock['symbol'] for stock in data['finance']['result'][0]['quotes']]
+    return tickers
 
-# Fetch sentiment score from news articles
-@st.cache_data
-def fetch_sentiment(symbol):
-    try:
-        newsapi = NewsApiClient(api_key=API_KEY)
-        articles = newsapi.get_everything(q=symbol, language='en', sort_by='relevancy', page_size=5).get('articles', [])
-        if not articles:
-            return 0
-        sentiment_score = sum(TextBlob(article['title']).sentiment.polarity for article in articles) / len(articles)
-        return sentiment_score
-    except Exception as e:
-        st.error(f"Error fetching sentiment: {e}")
-        return 0
+# Function to filter out stocks based on market criteria
+def filter_trending_stocks(tickers):
+    trending_stocks = []
 
-# Train Machine Learning Model
-@st.cache_resource
-def train_model(data):
-    data['Price Change'] = data['Close'].diff()
-    data['Target'] = np.where(data['Price Change'].shift(-1) > 0, 1, 0)
-    features = data[['Close', 'RSI', 'ATR', 'OBV', 'SMA_20', 'SMA_50']]
-    labels = data['Target']
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.3, random_state=42)
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    grid_search = GridSearchCV(estimator=model, param_grid={'n_estimators': [50, 100, 200]}, cv=5, scoring='accuracy')
-    grid_search.fit(X_train, y_train)
-    best_model = grid_search.best_estimator_
-    return best_model, grid_search.best_score_ * 100, X_test, y_test
-
-# Performance Tracking Function
-def track_performance(model, X_test, y_test):
-    predicted = model.predict(X_test)
-    accuracy = (predicted == y_test).mean() * 100
-    return accuracy
-
-# Option Recommendation Function
-def generate_recommendation(data, sentiment_score, model, symbol):
-    latest_data = data.iloc[-1]
-    latest_features = np.array([[latest_data['Close'], latest_data['RSI'], latest_data['ATR'], latest_data['OBV'], latest_data['SMA_20'], latest_data['SMA_50']]])
-    prediction_prob = model.predict_proba(latest_features)[0][1]
-    option = "Call" if prediction_prob > 0.5 else "Put"
-    if sentiment_score > 0.2 and option == "Put":
-        option = "Call"
-    elif sentiment_score < -0.2 and option == "Call":
-        option = "Put"
-    strike_price = round(latest_data['Close'] / 10) * 10
-    expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
+    for symbol in tickers:
+        try:
+            stock_data = fetch_stock_data(symbol)
+            recent_change = (stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-7]) / stock_data['Close'].iloc[-7]  # 7-day price change
+            if recent_change > 0.05:  # 5% increase is considered an uptrend
+                trending_stocks.append((symbol, 'Uptrend', recent_change))
+            elif recent_change < -0.05:  # 5% decrease is considered a downtrend
+                trending_stocks.append((symbol, 'Downtrend', recent_change))
+        except Exception as e:
+            st.error(f"Error fetching data for {symbol}: {e}")
+            continue
     
-    # Automated Alert (threshold check)
-    if prediction_prob > 0.75:  # Threshold for alert (e.g., high probability prediction)
-        st.warning(f"🔔 Alert! High probability of a **{option}** position for {symbol} based on current data!")
-    
-    return option, strike_price, expiration_date, latest_data
+    trending_stocks.sort(key=lambda x: abs(x[2]), reverse=True)  # Sort by the strongest trend
+    return trending_stocks[:5]  # Show the top 5 trending stocks
 
-# Function to check if ticker symbol is valid
+# Function to check if ticker is valid
 def is_valid_ticker(symbol):
     try:
         stock = yf.Ticker(symbol)
-        stock.history(period="1d")  # Try to fetch stock data
-        return True
-    except Exception:
+        return stock.history(period="1d") is not None
+    except:
         return False
 
-# Function to suggest closest valid symbols (based on partial match)
-def suggest_valid_symbols(symbol):
-    valid_symbols = ['AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA', 'SPY']  # Example list
-    close_matches = difflib.get_close_matches(symbol.upper(), valid_symbols, n=3, cutoff=0.6)  # Suggest closest matches
-    return close_matches
+# Function to fetch sentiment from news API
+def fetch_sentiment(symbol):
+    newsapi = NewsApiClient(api_key=API_KEY)
+    try:
+        articles = newsapi.get_everything(q=symbol, language='en', sort_by='publishedAt', page_size=5)
+        sentiment_score = 0
+        for article in articles['articles']:
+            text = article['title'] + " " + article['description']
+            sentiment_score += TextBlob(text).sentiment.polarity
+        return sentiment_score / len(articles['articles']) if len(articles['articles']) > 0 else 0
+    except Exception as e:
+        st.error(f"Error fetching news sentiment for {symbol}: {e}")
+        return 0
 
-# Function to fetch trending stocks based on price change
-@st.cache_data
-def get_trending_stocks():
-    symbols = ['AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'META', 'NVDA', 'SPY', 'AMD', 'NFLX']  # Add more if needed
-    trending_stocks = []
-    for symbol in symbols:
-        stock_data = fetch_stock_data(symbol)
-        recent_change = (stock_data['Close'].iloc[-1] - stock_data['Close'].iloc[-7]) / stock_data['Close'].iloc[-7]  # 7-day price change
-        if recent_change > 0.05:  # 5% increase is considered an uptrend
-            trending_stocks.append((symbol, 'Uptrend', recent_change))
-        elif recent_change < -0.05:  # 5% decrease is considered a downtrend
-            trending_stocks.append((symbol, 'Downtrend', recent_change))
+# Function to generate stock options recommendation
+def generate_recommendation(stock_data, sentiment_score, model, symbol):
+    # Example placeholder logic for generating recommendations
+    latest_price = stock_data['Close'].iloc[-1]
+    strike_price = latest_price * 1.05 if sentiment_score > 0 else latest_price * 0.95
+    expiration = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+    option = 'Call' if sentiment_score > 0 else 'Put'
+    return option, strike_price, expiration, stock_data.iloc[-1]
+
+# Function to train model on stock data
+def train_model(stock_data):
+    X = stock_data[['RSI', 'ATR', 'SMA_20', 'SMA_50']]  # Example features
+    y = np.where(stock_data['Close'].shift(-1) > stock_data['Close'], 1, 0)  # Target: 1 if next day price is higher
+
+    # Train-test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
-    # Sort by the strongest trend
-    trending_stocks.sort(key=lambda x: abs(x[2]), reverse=True)
-    return trending_stocks[:5]  # Top 5 trending stocks
+    # Model training
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+
+    # Model accuracy
+    accuracy = model.score(X_test, y_test) * 100
+    return model, accuracy, X_test, y_test
+
+# Function to track model performance
+def track_performance(model, X_test, y_test):
+    accuracy = model.score(X_test, y_test) * 100
+    return accuracy
+
+# Function to fetch real-time price
+def fetch_real_time_price(symbol):
+    stock = yf.Ticker(symbol)
+    real_time_data = stock.history(period="1d")
+    return real_time_data['Close'].iloc[-1]
 
 # Streamlit UI
 st.title("💰 AI Stock Options Predictor 💰\n Made by Shriyan Kandula")
@@ -190,7 +175,8 @@ if symbol:
 
 # New Feature: Trending Stocks
 st.subheader("🚀 Trending Stocks")
-trending_stocks = get_trending_stocks()
+tickers = fetch_all_tickers()  # Fetch all tickers dynamically
+trending_stocks = filter_trending_stocks(tickers)
 for stock in trending_stocks:
     st.write(f"**{stock[0]}**: {stock[1]} ({stock[2]*100:.2f}%)")
     stock_data = fetch_stock_data(stock[0])
