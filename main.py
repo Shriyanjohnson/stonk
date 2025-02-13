@@ -3,8 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
-import os
-import io
 from textblob import TextBlob
 from newsapi import NewsApiClient
 from sklearn.ensemble import RandomForestClassifier
@@ -78,6 +76,12 @@ def train_model(data):
     best_model = grid_search.best_estimator_
     return best_model, grid_search.best_score_ * 100, X_test, y_test
 
+# Performance Tracking Function
+def track_performance(model, X_test, y_test):
+    predicted = model.predict(X_test)
+    accuracy = (predicted == y_test).mean() * 100
+    return accuracy
+
 # Option Recommendation Function
 def generate_recommendation(data, sentiment_score, model, symbol):
     latest_data = data.iloc[-1]
@@ -90,10 +94,15 @@ def generate_recommendation(data, sentiment_score, model, symbol):
         option = "Put"
     strike_price = round(latest_data['Close'] / 10) * 10
     expiration_date = (datetime.datetime.now() + datetime.timedelta((4 - datetime.datetime.now().weekday()) % 7)).date()
+    
+    # Automated Alert (threshold check)
+    if prediction_prob > 0.75:  # Threshold for alert (e.g., high probability prediction)
+        st.warning(f"🔔 Alert! High probability of a **{option}** position for {symbol} based on current data!")
+    
     return option, strike_price, expiration_date, latest_data
 
 # Streamlit UI
-st.title("💰 AI Stock Options Predictor 💰 | Made by Shriyan Kandula")
+st.title("💰 AI Stock Options Predictor 💰\n Made by Shriyan Kandula")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
@@ -101,6 +110,9 @@ if symbol:
     sentiment_score = fetch_sentiment(symbol)
     model, accuracy, X_test, y_test = train_model(stock_data)
     option, strike_price, expiration, latest_data = generate_recommendation(stock_data, sentiment_score, model, symbol)
+
+    # Performance Metrics: Tracking model performance on test data
+    test_accuracy = track_performance(model, X_test, y_test)
 
     # Fetch and display the real-time stock price
     real_time_price = fetch_real_time_price(symbol)
@@ -110,7 +122,6 @@ if symbol:
     st.write(f"**Strike Price:** ${strike_price}")
     st.write(f"**Expiration Date:** {expiration}")
     st.write(f"### 🔥 Model Accuracy: **{accuracy:.2f}%**")
-    test_accuracy = model.score(X_test, y_test) * 100
     st.write(f"### Test Accuracy on Unseen Data: **{test_accuracy:.2f}%**")
     st.write(f"### Real-Time Price: **${real_time_price:.2f}**")
 
@@ -122,47 +133,10 @@ if symbol:
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
     st.plotly_chart(fig)
 
-    # Features and what sets it apart
-    st.write("### Key Features:")
-    st.write("""
-        - **Accurate Option Predictions:** Based on various technical indicators like RSI, OBV, SMA, and ATR.
-        - **Sentiment Analysis Integration:** Leverages news sentiment to refine predictions.
-        - **Real-Time Data:** Provides up-to-date stock prices and trends.
-        - **Machine Learning:** Uses a trained model for prediction accuracy.
-        - **Custom Indicators:** Includes custom OBV for more insightful trading decisions.
-        - **Tested Model:** Evaluated with a test set for real-world accuracy.
-
-    ### What Sets It Apart:
-    - **Comprehensive Prediction Models:** By combining historical data, technical indicators, and sentiment analysis, this app provides a multifaceted approach to predicting stock options.
-    - **Accurate and Reliable Data:** Real-time stock prices and regularly updated indicators ensure that you always have the most current information at your fingertips.
-    - **User-Friendly Interface:** Designed with clarity and simplicity, allowing easy access to key insights and recommendations.
-    """)
-
-    # Indicator values and trend explanation
-    st.write("### Indicator Values and Trend Analysis:")
-    st.write(f"**RSI (Relative Strength Index):** {latest_data['RSI']:.2f}")
-    if latest_data['RSI'] < 30:
-        st.write("The RSI indicates that the stock is potentially oversold, suggesting a possible upward trend.")
-    elif latest_data['RSI'] > 70:
-        st.write("The RSI indicates that the stock is potentially overbought, suggesting a possible downward trend.")
-    else:
-        st.write("The RSI indicates neutral market conditions, and further analysis is needed.")
-
-    st.write(f"**ATR (Average True Range):** {latest_data['ATR']:.2f}")
-    if latest_data['ATR'] > 1.5:
-        st.write("A high ATR value indicates high volatility, which might suggest a strong move up or down.")
-    else:
-        st.write("A low ATR indicates low volatility, suggesting a more stable market environment.")
-
-    st.write(f"**OBV (On-Balance Volume):** {latest_data['OBV']}")
-    if latest_data['OBV'] > 0:
-        st.write("Positive OBV suggests that buying volume is driving the stock price up, indicating an uptrend.")
-    else:
-        st.write("Negative OBV suggests that selling volume is increasing, indicating a downtrend.")
-
-    st.write(f"**SMA-20 (20-Day Simple Moving Average):** {latest_data['SMA_20']:.2f}")
-    st.write(f"**SMA-50 (50-Day Simple Moving Average):** {latest_data['SMA_50']:.2f}")
-    if latest_data['SMA_20'] > latest_data['SMA_50']:
-        st.write("The stock price is above the 50-day moving average, suggesting a potential upward trend.")
-    else:
-        st.write("The stock price is below the 50-day moving average, indicating a potential downward trend.")
+    # Displaying the indicator values and their significance
+    st.subheader("📊 Indicator Analysis")
+    st.write(f"**RSI (Relative Strength Index):** {latest_data['RSI']:.2f} - RSI values above 70 may suggest an overbought condition (uptrend possible reversal), and below 30 may indicate an oversold condition (uptrend likely).")
+    st.write(f"**ATR (Average True Range):** {latest_data['ATR']:.2f} - A high ATR value suggests higher volatility, potentially signaling larger price movements.")
+    st.write(f"**SMA_20 (20-period Simple Moving Average):** {latest_data['SMA_20']:.2f} - A rising SMA_20 could indicate an uptrend, while a falling SMA_20 could suggest a downtrend.")
+    st.write(f"**SMA_50 (50-period Simple Moving Average):** {latest_data['SMA_50']:.2f} - A crossover above the 50-day SMA could indicate bullish movement (uptrend).")
+    st.write(f"**OBV (On-Balance Volume):** {latest_data['OBV']:.2f} - A rising OBV suggests increasing buying pressure (uptrend), while a falling OBV signals a downtrend.")
