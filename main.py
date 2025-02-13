@@ -93,7 +93,7 @@ def generate_recommendation(data, sentiment_score, model, symbol):
     return option, strike_price, expiration_date, latest_data
 
 # Streamlit UI
-st.title("💰 AI Stock Options Predictor 💰")
+st.title("💰 AI Stock Options Predictor 💰 | Made by Shriyan Kandula")
 symbol = st.text_input("Enter Stock Symbol", "AAPL")
 
 if symbol:
@@ -121,3 +121,19 @@ if symbol:
                                  low=stock_data['Low'], close=stock_data['Close']), row=1, col=1)
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['RSI'], mode='lines', name='RSI'), row=2, col=1)
     st.plotly_chart(fig)
+
+    # Features and what sets it apart
+    st.write("### Key Features:")
+    st.write("""
+        - **Accurate Option Predictions:** Based on various technical indicators like RSI, OBV, SMA, and ATR.
+        - **Sentiment Analysis Integration:** Leverages news sentiment to refine predictions.
+        - **Real-Time Data:** Provides up-to-date stock prices and trends.
+        - **Machine Learning:** Uses a trained model for prediction accuracy.
+        - **Custom Indicators:** Includes custom OBV for more insightful trading decisions.
+        - **Tested Model:** Evaluated with a test set for real-world accuracy.
+
+    ### What Sets It Apart:
+    - **Comprehensive Prediction Models:** By combining historical data, technical indicators, and sentiment analysis, this app provides a multifaceted approach to predicting stock options.
+    - **Accurate and Reliable Data:** Real-time stock prices and regularly updated indicators ensure that you always have the most current information at your fingertips.
+    - **User-Friendly Interface:** Designed with clarity and simplicity, allowing easy access to key insights and recommendations.
+    """)
